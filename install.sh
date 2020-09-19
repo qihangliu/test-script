@@ -153,7 +153,7 @@ function oh-my-zsh () {
 
 
 
-# function virualbox () {
+# function virtualbox () {
 #         # virtualbox 
 #         apt update
 #         apt -y install  virtualbox-6.1
