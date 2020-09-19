@@ -7,4 +7,4 @@
   4. 配置Java环境
   5. 安装oh-my-zsh
   6. 安装Firefox
-- 已经在dubuntu上测试通过，后续继续补充
+- 已经在ubuntu上测试通过，后续继续补充
