@@ -2,6 +2,15 @@
 
 set -eu
 
+echo "Choose the number you wanna install/upgrade [1|2|3|4|5|6]:"
+echo "1. bashrc设置"
+echo "2. apt安装常用软件"
+echo "3. 安装vscode"
+echo "4. 安装Oracle_JDK"
+echo "5. 安装oh-my-zsh"
+echo "6. 安装Firefox浏览器"
+read -rp "> " CHOICE
+
 function bashrc () {
 
         # alias
@@ -153,7 +162,7 @@ function oh-my-zsh () {
 
 
 
-# function virtualbox () {
+# function virualbox () {
 #         # virtualbox 
 #         apt update
 #         apt -y install  virtualbox-6.1
@@ -199,15 +208,25 @@ function firefox () {
 }
 
 
-# bashrc
-apt_install
-oracle_java
-# oh-my-zsh
-# virtualbox
-# firefox
+# # bashrc
+# # apt_install
+# # oracle_java
+# # oh-my-zsh
+# # virtualbox
+# # firefox
 
-
-
-
-
-
+if [ $CHOICE = 1 ]; then
+        bashrc
+elif [ $CHOICE = 2 ]; then
+        apt_install
+elif [ $CHOICE = 3 ]; then
+        vscode
+elif [ $CHOICE = 4 ]; then
+        oracle_java
+elif [ $CHOICE = 5 ]; then
+        oh-my-zsh
+elif [ $CHOICE = 6 ]; then
+        firefox
+else
+	exit
+fi
