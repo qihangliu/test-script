@@ -2,11 +2,11 @@
 
 set -eu
 
-echo "Choose the number you wanna install/upgrade [1|2|3|4|5|6]:"
+echo "Choose the options you wanna install/upgrade [1|2|3|4|5|6]:"
 echo "1. bashrc设置"
 echo "2. apt安装常用软件"
 echo "3. 安装vscode"
-echo "4. 安装Oracle_JDK"
+echo "4. 安装Oracle_JDK8"
 echo "5. 安装oh-my-zsh"
 echo "6. 安装Firefox浏览器"
 read -rp "> " CHOICE
@@ -162,7 +162,7 @@ function oh-my-zsh () {
 
 
 
-# function virualbox () {
+# function virtualbox () {
 #         # virtualbox 
 #         apt update
 #         apt -y install  virtualbox-6.1
