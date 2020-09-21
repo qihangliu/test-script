@@ -9,6 +9,7 @@ echo "3. 安装vscode"
 echo "4. 安装Oracle_JDK8"
 echo "5. 安装oh-my-zsh"
 echo "6. 安装Firefox浏览器"
+echo "7. 安装以上所有"
 read -rp "> " CHOICE
 
 function bashrc () {
@@ -226,6 +227,12 @@ elif [ $CHOICE = 4 ]; then
 elif [ $CHOICE = 5 ]; then
         oh-my-zsh
 elif [ $CHOICE = 6 ]; then
+        firefox
+elif [  $Choose = 7 ];then
+        apt_install
+        vscode
+        oracle_java
+        oh-my-zsh
         firefox
 else
 	exit
