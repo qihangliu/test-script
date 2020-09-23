@@ -2,7 +2,7 @@
 
 set -eu
 
-echo "Choose the options you wanna install/upgrade [1|2|3|4|5|6]:"
+echo "choose the options you wanna install/upgrade [1|2|3|4|5|6|7]:"
 echo "1. bashrc设置"
 echo "2. apt安装常用软件"
 echo "3. 安装vscode"
@@ -84,6 +84,9 @@ function apt_install () {
         # wget
         apt -y install wget
 
+        # svn
+        apt -y install svn
+
         # deepin安装nvidia闭源驱动，所需环境，有风险！！！
         # apt -y install linux-headers-amd64
         # apt -y install linux-headers-deepin-amd64
@@ -116,7 +119,7 @@ function vscode () {
         sudo apt  install apt-transport-https
         sudo apt  update
         sudo apt  install code
-        # 安装的软件有时候替代默认的文件方式，打开文件直接会用vscode打开，终端输入以下命令修复
+        # 安装的软件有时候替代默认的文件打开方式，会直接用vscode打开，终端输入以下命令修复
         xdg-mime default dde-file-manager.desktop inode/directory
 }
 
@@ -124,7 +127,7 @@ function vscode () {
 
 function oracle_java () {
 
-        # install oracle jdk
+        # install oracle jdk8
         echo "ready configure oracle java jdk"
         jdkContainer="jdk.tar.gz"
         mkdir -p ~/Downloads
@@ -153,11 +156,18 @@ function oracle_java () {
 
 function oh-my-zsh () {
         # oh-my-zsh 
-        # 其中配置文件在 ~/.zshrc 可以配置主题和插件
+        # 配置文件在 ~/.zshrc 可以配置主题写到theme和插件下载后写到plugins里面
+        # z 快速跳转目录 
+        # zsh-syntax-highlighting 高亮可用的命令
+        # zsh-autosuggestions 输入命令自动补全
+        # instll_zsh
         sudo apt -y  install zsh
         sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
         sudo apt -y install fonts-powerline
+        # 切换bash为zsh
         chsh -s /bin/zsh
+
+        source ~/.zshrc
 
 }
 
