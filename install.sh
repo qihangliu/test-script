@@ -105,6 +105,10 @@ function apt_install () {
 
         # TimeShift
         apt -y install timeshift
+
+        # postman
+        sudo apt -y install snapd
+        sudo snap install postman
         
 }
 
@@ -218,6 +222,36 @@ function firefox () {
 
 }
 
+function postman (){
+        wget -O postman https://dl.pstmn.io/download/latest/linux64
+        cd /home/$USER/Downloads
+        tar -xzf linux64
+        mv Postman /opt/
+        ln -s /opt/Postman/Postman /usr/local/bin/postman
+        postman
+
+
+        # 创建postman桌面图标
+        cd /usr/share/applications
+        cat > postman.deskptop<<-EOF
+        [Desktop Entry]
+        Type=Application
+        Name=Postman
+        Icon=/opt/Postman/app/resources/app/assets/icon.png
+        Exec="/opt/Postman/Postman"
+        Comment=Postman Desktop App
+        Categories=Development;Code;
+	EOF
+
+
+        ## postman卸载方法
+        # 通过手动安装
+        # sudo rm -rf /opt/apps/Postman && rm /usr/local/bin/postman
+        # sudo rm /usr/share/applications/postman.desktop
+        # 通过自动安装
+        # sudo snap remove postman
+}
+
 
 # # bashrc
 # # apt_install
@@ -225,6 +259,7 @@ function firefox () {
 # # oh-my-zsh
 # # virtualbox
 # # firefox
+# # postman
 
 if [ $CHOICE = 1 ]; then
         bashrc
