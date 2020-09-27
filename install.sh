@@ -166,7 +166,17 @@ function oh-my-zsh () {
         # zsh-autosuggestions 输入命令自动补全
         # instll_zsh
         sudo apt -y  install zsh
-        sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+        # sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+        # 由于国内经常无法使用 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+        # 所以，索性将安装脚本下载下来直接使用
+        #curl -o- https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash
+        zsh/oh-my-zsh-install.sh
+        # choose oh-my-zsh theme
+        sed -i "s/^ZSH_THEME=.*/ZSH_THEME=\"ys\"/g" ~/.zshrc
+        # install oh-my-zsh plugins
+        git clone https://github.com/zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/plugins/zsh-autosuggestions
+        git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/plugins/zsh-syntax-highlighting
+        sed -i "s/^plugins=.*/plugins=(git sudo z wd extract zsh-autosuggestions zsh-syntax-highlighting)/g" ~/.zshrc
         sudo apt -y install fonts-powerline
         # 切换bash为zsh
         chsh -s /bin/zsh
