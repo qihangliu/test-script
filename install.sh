@@ -5,7 +5,7 @@ set -eu
 echo "choose the options you wanna install/upgrade [1|2|3|4|5|6|7]:"
 echo "1. bashrc设置"
 echo "2. apt安装常用软件"
-echo "3. 安装vscode"
+echo "3. 安装VSCode"
 echo "4. 安装Oracle_JDK8"
 echo "5. 安装oh-my-zsh"
 echo "6. 安装Firefox浏览器"
@@ -21,13 +21,13 @@ function bashrc () {
         echo "alias c='clear'" >> /root/.bashrc
         echo "alias vi='vim'" >> /root/.bashrc
 
-        #任何以空格开头的命令都不会保存到历史记录列表中
+        # 任何以空格开头的命令都不会保存到历史记录列表中
         echo "HISTCONTROL=ignorespace" >> /root/.bashrc
 
-        #从历史记录文件中删除之前出现的所有相同命令，并且只将最后一次调用保存到历史记录列表中。
+        # 从历史记录文件中删除之前出现的所有相同命令，并且只将最后一次调用保存到历史记录列表中。
         echo "HISTCONTROL=ignorespace:erasedups" >> /root/.bashrc
 
-        #在历史记录文件中在所有的条目前面添加上时间戳
+        # 在历史记录文件中在所有的条目前面添加上时间戳
         echo 'HISTTIMEFORMAT="%F %T"' >> /root/.bashrc
 
         source ~/.bashrc
@@ -93,7 +93,7 @@ function apt_install () {
         # apt -y inetutils dkms
         # apt -y install make 
         # apt -y install gcc
-
+number 
         # deepin显卡驱动管理器,用来切换核心显卡和开源显卡驱动
         # apt -y inetutils deepin-graphics-driver-manager
 
@@ -106,9 +106,14 @@ function apt_install () {
         # TimeShift
         apt -y install timeshift
 
+        # 以下为snap安装应用
         # postman
+        # 安装snpd
         sudo apt -y install snapd
         sudo snap install postman
+
+        # vscode
+        sudo snap install --classic code # or code-insiders
         
 }
 
@@ -166,11 +171,11 @@ function oh-my-zsh () {
         # zsh-autosuggestions 输入命令自动补全
         # instll_zsh
         sudo apt -y  install zsh
-        # sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+        sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
         # 由于国内经常无法使用 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
         # 所以，索性将安装脚本下载下来直接使用
-        #curl -o- https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash
-        zsh/oh-my-zsh-install.sh
+        curl -o- https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash
+        # zsh/oh-my-zsh-install.sh
         # choose oh-my-zsh theme
         sed -i "s/^ZSH_THEME=.*/ZSH_THEME=\"ys\"/g" ~/.zshrc
         # install oh-my-zsh plugins
