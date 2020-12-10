@@ -1,4 +1,4 @@
-#/bin/bash 
+#!/bin/env bash
 
 set -eu
 
@@ -93,7 +93,6 @@ function apt_install () {
         # apt -y inetutils dkms
         # apt -y install make 
         # apt -y install gcc
-number 
         # deepin显卡驱动管理器,用来切换核心显卡和开源显卡驱动
         # apt -y inetutils deepin-graphics-driver-manager
 
@@ -113,7 +112,7 @@ number
         sudo snap install postman
 
         # vscode
-        sudo snap install --classic code # or code-insiders
+        sudo snap install --classic code  # or code-insiders
         
 }
 
@@ -237,7 +236,7 @@ function firefox () {
 
 }
 
-function postman (){
+function postman () {
         wget -O postman https://dl.pstmn.io/download/latest/linux64
         cd /home/$USER/Downloads
         tar -xzf linux64
