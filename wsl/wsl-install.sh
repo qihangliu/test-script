@@ -41,11 +41,13 @@ END
         # sudo apt-get remove docker docker-engine docker.io containerd runc
         
         # 获取安装脚本执行安装
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sudo sh get-docker.sh
+       
 }
 
-
+function get-docker () {
+	 curl -fsSL https://get.docker.com -o get-docker.sh
+     sudo sh get-docker.sh
+}
 
 function oracle_jdk8 () {
 
@@ -87,7 +89,7 @@ function android_sdk () {
         cp ~/Downloads/platform-android /usr/lib/android-sdk/
 
         echo "test for successful installation"
-        adb version 
+        adb --version 
 
 }
 
@@ -123,8 +125,9 @@ function oh-my-zsh () {
 }
 
 
-functiona main() {
+function main() {
         apt_install
+        get-docker
         oracle_java
         android_sdk
         oh-my-zsh
