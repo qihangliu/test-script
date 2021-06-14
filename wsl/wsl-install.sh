@@ -34,19 +34,15 @@ END
         apt-get install -y net-tools
 
         apt-get install -y unzip
-
-        # 安装docker
-
-        # # 先卸载旧版本docker
-        # sudo apt-get remove docker docker-engine docker.io containerd runc
-        
-        # 获取安装脚本执行安装
        
 }
 
 function get-docker () {
-	 curl -fsSL https://get.docker.com -o get-docker.sh
-     sudo sh get-docker.sh
+        # remove old version
+        sudo apt-get remove docker docker-engine docker.io containerd runc
+        # install latest version
+	curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
 }
 
 function oracle_jdk8 () {
@@ -114,7 +110,7 @@ function oh-my-zsh () {
         git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/plugins/zsh-syntax-highlighting
         sed -i "s/^plugins=.*/plugins=(git sudo z wd extract zsh-autosuggestions zsh-syntax-highlighting)/g" ~/.zshrc
 
-        # 安装fonts-powerline
+        # fonts-powerline
         sudo apt-get install -y  fonts-powerline
 
         # 切换bash为zsh
