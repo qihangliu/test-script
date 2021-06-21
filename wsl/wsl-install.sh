@@ -4,9 +4,9 @@ set -euo pipefail
 
 function apt_install () {
 
-#  备份source.list
+#  backup  source.list
 cp /etc/apt/sources.list /etc/apt/sources.list.bak
-# 修改为阿里云的镜像源
+# change sourse 
 cat > /etc/apt/sources.list << END
 deb http://mirrors.aliyun.com/ubuntu/ focal main restricted universe multiverse
 deb-src http://mirrors.aliyun.com/ubuntu/ focal main restricted universe multiverse
