@@ -78,9 +78,9 @@ function oracle_jdk8 () {
 function android_sdk () {
         apt-get install -y android-tools-adb
 
-        wget  -c https://dl.google.com/android/repository/platform-tools_r30.0.5-linux.zip -P ~/Downloads
-
-        unzip ~/Downloads/platform-tools_r30.0.5-linux.zip
+        wget  -c https://dl.google.com/android/repository/platform-tools_r31.0.3-linux.zip?hl=zh_cn -P ~/Downloads
+		
+        unzip ~/Downloads/platform-tools_r31.0.3-linux.zip
 
         cp ~/Downloads/platform-android /usr/lib/android-sdk/
 
