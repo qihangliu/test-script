@@ -1,0 +1,114 @@
+// Jenkinsfile
+pipeline {
+    // 1. 定义构建环境：使用官方的、最新的 Maven 镜像
+    agent {
+        docker {
+            // 使用官方镜像，无需自己维护
+            image 'maven:3-eclipse-temurin-21' 
+            // 2. 缓存与权限控制
+            // -u root:root : 强制容器以 root 用户运行，解决权限问题
+            // -v maven-m2-cache... : 使用 Docker 命名卷来持久化缓存，与其他 Job 共享
+            args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        }
+    }
+
+    stages {
+        // ====================================================================
+        //  阶段：从 Git 仓库拉取代码
+        // ====================================================================
+        stage('Checkout') {
+            steps {
+                echo 'Checking out the code...'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/workbench']],
+                    userRemoteConfigs: [[
+                        url: 'https://gitee.com/changyunhuizhi/opwb-services.git',
+                        // 'tang-gitee凭据' 是你在 Jenkins 中设定的凭证 ID
+                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                    ]]
+                ])
+            }
+        }
+        // ====================================================================
+
+        stage('Build') {
+            steps {
+                script {
+                    def settingsXml = '''
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>aliyunmaven</id>
+      <mirrorOf>*</mirrorOf>
+      <name>Aliyun Maven</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+    </mirror>
+  </mirrors>
+</settings>
+'''
+                    writeFile file: 'custom-settings.xml', text: settingsXml
+                    echo '已在工作区内动态创建 settings.xml。'
+                    
+                    // 执行 Maven 命令, 并跳过测试
+                    sh 'mvn -s custom-settings.xml clean install -DskipTests'
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段：归档到共享目录
+        // ====================================================================
+        stage('Archive to Share') {
+            steps {
+                script {
+                    // 使用 Groovy 来生成时间戳和路径，更稳健
+                    def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
+                    def shareRoot = "${env.JENKINS_HOME}/share"
+                    def targetDir = "${shareRoot}/opwb-service-${timestamp}"
+
+                    // 执行归档操作
+                    sh """
+                        set -e
+                        echo "正在创建目标目录: ${targetDir}"
+                        mkdir -p "${targetDir}/opwb-web"
+                        mkdir -p "${targetDir}/opwb-terminal"
+
+                        echo "将当前工作区标记为 Git 安全目录..."
+                        # 修复：解决 Git 'dubious ownership' 问题
+                        git config --global --add safe.directory ${env.WORKSPACE}
+
+                        echo "正在生成 Git 日志..."
+                        # 直接在当前工作区执行 git log
+                        git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
+
+                        echo "正在拷贝构建产物..."
+                        cp "${env.WORKSPACE}/opwb-web/target/opwb-web-0.0.1-SNAPSHOT.jar" "${targetDir}/opwb-web/"
+                        cp "${env.WORKSPACE}/opwb-terminal/target/opwb-terminal-0.0.1-SNAPSHOT.jar" "${targetDir}/opwb-terminal/"
+
+                        # 使用 cat 和 heredoc 来整洁地打印多行消息
+                        cat <<EOF
+--------------------------------------------------------
+文件已成功归档到目标目录
+您现在可以通过以下网络路径从 Windows 访问：
+\\\\\\\\10.189.189.245\\\\share\\\\opwb-service-${timestamp}
+或者先访问 \\\\\\\\10.189.189.245\\\\share 再进入对应目录
+--------------------------------------------------------
+EOF
+                    """
+                }
+            }
+        }
+        // ====================================================================
+    }
+
+    post {
+        always {
+            // 构建结束后总是执行清理工作
+            echo 'Build finished.'
+        }
+    }
+}

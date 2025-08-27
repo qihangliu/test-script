@@ -1,0 +1,120 @@
+// Jenkinsfile
+pipeline {
+    // 1. 定义构建环境：使用官方的、最新的 Maven 镜像
+    agent {
+        docker {
+            // 使用官方镜像，无需自己维护
+            image 'maven:3-eclipse-temurin-21' 
+            // 2. 缓存与权限控制
+            // -u root:root : 强制容器以 root 用户运行，解决权限问题
+            // -v maven-m2-cache... : 使用 Docker 命名卷来持久化缓存，解决 Docker-in-Docker 路径问题
+            args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        }
+    }
+
+    stages {
+        // ====================================================================
+        //  阶段：从 Git 仓库拉取代码
+        // ====================================================================
+        stage('Checkout') {
+            steps {
+                echo 'Checking out the code...'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/workbench']],
+                    userRemoteConfigs: [[
+                        url: 'https://gitee.com/changyunhuizhi/opwb-services.git',
+                        // 'tang-gitee凭据' 是你在 Jenkins 中设定的凭证 ID
+                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                    ]]
+                ])
+            }
+        }
+        // ====================================================================
+
+        stage('Build & Test') {
+            steps {
+                script {
+                    // ====================================================================
+                    //  最终解决方案：在 Pipeline 内部动态创建 settings.xml 文件
+                    // ====================================================================
+                    def settingsXml = '''
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>aliyunmaven</id>
+      <mirrorOf>*</mirrorOf>
+      <name>Aliyun Maven</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+    </mirror>
+  </mirrors>
+</settings>
+'''
+                    // 将内容写入容器内工作区的一个临时文件
+                    writeFile file: 'custom-settings.xml', text: settingsXml
+                    echo '已在工作区内动态创建 settings.xml。'
+                    // ====================================================================
+
+                    // 3. 执行 Maven 命令, 并通过 -s 参数指定使用我们刚刚创建的配置文件，并跳过测试
+                    sh 'mvn -s custom-settings.xml clean install -DskipTests'
+                }
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                // 4. 归档构建产物
+                // 只归档 opwb-web 模块下我们真正需要部署的 jar 包
+                echo 'Archiving the opwb-web artifact...'
+                archiveArtifacts artifacts: 'opwb-web/target/*.jar', followSymlinks: false, allowEmptyArchive: true
+            }
+        }
+
+        // ====================================================================
+        //  阶段：部署到测试环境 (使用 SSH 密钥)
+        // ====================================================================
+        stage('Deploy to Test') {
+            steps {
+                // 使用 sshagent 插件来安全地使用 SSH 密钥凭证
+                // 已更新为你的凭证 ID
+                sshagent(credentials: ['ssh-key-for-test-server']) {
+                    script {
+                        // 优化：先检查是否找到了要部署的 jar 文件
+                        def files = findFiles(glob: 'opwb-web/target/*.jar')
+                        if (files.size() == 0) {
+                            error "错误：在 opwb-web/target/ 目录下没有找到任何 .jar 文件进行部署！"
+                        }
+                        def jarFile = files[0].path
+                        echo "Found artifact to deploy: ${jarFile}"
+
+                        def remoteUser = "root"
+                        def remoteHost = "10.189.189.189"
+                        def remoteDir = "/data/server/opwbworkbench/opwb-web-backup/"
+
+                        // 1. 使用 scp 将 jar 文件传输到远程服务器
+                        echo "Transferring ${jarFile} to ${remoteUser}@${remoteHost}:${remoteDir}"
+                        // StrictHostKeyChecking=no 避免了首次连接的交互式提示
+                        sh "scp -o StrictHostKeyChecking=no ${jarFile} ${remoteUser}@${remoteHost}:${remoteDir}"
+
+                        // 2. 在远程服务器上执行部署脚本
+                        echo "Executing remote deployment script..."
+                        sh "ssh -o StrictHostKeyChecking=no ${remoteUser}@${remoteHost} 'cd ${remoteDir} && bash replace.sh'"
+                        
+                        echo "Deployment complete."
+                    }
+                }
+            }
+        }
+        // ====================================================================
+    }
+
+    post {
+        always {
+            // 构建结束后总是执行清理工作
+            echo 'Build finished.'
+        }
+    }
+}
