@@ -42,8 +42,10 @@ pipeline {
                 echo '正在配置 NPM 使用淘宝镜像源...'
                 sh 'npm config set registry https://registry.npmmirror.com'
                 
-                echo '正在安装 NPM 依赖...'
-                sh 'npm install'
+                echo '正在安装 NPM 依赖 (使用 npm ci)...'
+                // 优化：换回 npm ci，它在CI环境中通常更快、更可靠。
+                // --cache /root/.npm 明确告诉 npm 使用我们挂载的共享缓存卷。
+                sh 'npm ci --cache /root/.npm'
                 sh 'npm rebuild core-js vue-demi ant-design-vue'
             }
         }
