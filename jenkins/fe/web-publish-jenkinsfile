@@ -112,7 +112,7 @@ pipeline {
                                 tar -czf "\$BACKUP_FILE" -C "\$(dirname "\$HTML_DIR")" "\$(basename "\$HTML_DIR")"
                                 
                                 echo "--> 清理旧备份，只保留 \${MAX_BACKUPS} 个..."
-                                ls -1t html_backup_*.tar.gz 2>/dev/null | tail -n + \$((\${MAX_BACKUPS} + 1)) | xargs -r rm -f
+                                ls -1t html_backup_*.tar.gz 2>/dev/null | tail -n +\$((\${MAX_BACKUPS} + 1)) | xargs -r rm -f
 
                                 echo "--> 清空 HTML 目录..."
                                 rm -rf "\${HTML_DIR:?}"/*
