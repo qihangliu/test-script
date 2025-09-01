@@ -1,0 +1,54 @@
+pipeline {
+    agent any
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    // 设置代码拉取重试
+                    retry(count: 3) {
+                        // 清理工作空间
+                        cleanWs()
+                        // 拉取代码，分支为 main
+                        git branch: 'main',
+                            // 使用gitee拉取代码
+                            credentialsId: '463e6b72-63de-4775-8ca4-01f465f4f33e',
+                            // url: 'https://gitee.com/liuqhtech/xyxa-api-test.git'
+                            url: 'https://gitee.com/changyunhuizhi/opwb-automation.git'
+                            
+                    }
+                }
+            }
+        }
+        stage('Run Tests') {
+            steps {
+                script {
+                    // 启动容器来运行脚本
+                    // docker.image('testenv:test').inside("--volume ${WORKSPACE}:/app --volume ${WORKSPACE}/report:/app/report -w /app") {
+                    docker.image('testenv:3.0-250811').inside("--volume ${WORKSPACE}:/app --volume ${WORKSPACE}/report:/app/report -w /app") {
+                        // 除服务器巡检
+                        sh 'python run_main_test.py --clean --type read_yaml login host_os network backup'
+                        // sh 'python run_main_test.py --clean --type read_yaml login network backup --report'
+                        // 仅测试登录和检查配置文件
+                        // sh 'python run_main_test.py --clean --type login read_yaml'
+                        // 仅测试主机服务器巡检任务
+                        // sh 'python run_main_test.py --clean --type host_os'
+                        // 所有任务
+                        // sh 'python run_main_test.py --clean'
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            // 归档 log 文件夹中的所有文件，排除 .gitkeep
+            archiveArtifacts artifacts: 'log/*', excludes: 'log/.gitkeep', allowEmptyArchive: true
+            // 展示报告
+            allure includeProperties: false, jdk: '', report: 'report/allure-report', results: [[path: 'report/allure-results']]
+            // 重构后路径
+            // archiveArtifacts artifacts: 'output/log/*', excludes: 'output/log/.gitkeep', allowEmptyArchive: true
+            // 展示报告
+            // allure includeProperties: false, jdk: '', report: 'output/report/allure-report', results: [[path: 'output/report/allure-results']]
+        }
+    }
+}
