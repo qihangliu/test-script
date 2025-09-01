@@ -1,0 +1,51 @@
+# Byte-compiled / optimized / DLL
+__pycache__/
+*.py[cod]
+*$py.class
+
+# uv 缓存与锁文件
+.venv/
+.uv/
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+out/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# pytest / coverage
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+
+# mypy / ruff / black
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# 日志 & 临时文件
+*.log
+*.tmp
+*.bak
+
+# Jenkins 生成的工件（按项目实际需要）
+workspace/
+target/
+*.war
+*.jar
+
+# 其他
+.env
+.vscode/
