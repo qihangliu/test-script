@@ -1,0 +1,305 @@
+credentials:
+  system:
+    domainCredentials:
+    - credentials:
+      - usernamePassword:
+          description: "tang-gitee凭据"
+          id: "d5208b73-a80f-403b-a5df-365614d1362e"
+          password: "{AQAAABAAAAAQs8mYV3P365rIMIpDY4RYqfB7Tst/znpL0E1UXxgWXw8=}"
+          scope: GLOBAL
+          username: "15902922058"
+          usernameSecret: true
+      - usernamePassword:
+          description: "github凭据"
+          id: "fc710dea-7e0a-4685-a11a-985bae239d61"
+          password: "{AQAAABAAAAAwhz9ZKATCdfW8akl5ubDfo7030vs5P6YIpx/Xc5hxQRjHSvtH5/1yX33GgRQ+wZl56o81qBgiGZAfiDPd5mDYlQ==}"
+          scope: GLOBAL
+          username: "qihangliu"
+          usernameSecret: true
+      - usernamePassword:
+          description: "liu-gitee凭据"
+          id: "463e6b72-63de-4775-8ca4-01f465f4f33e"
+          password: "{AQAAABAAAAAwbPc4vqAZvNKVegL2p8b1It+dsovydB00u5dMQTO3wwVMU3kPb3XR+bt5RlGynu2+T8PgRq92qBhw93K8ZFivdQ==}"
+          scope: GLOBAL
+          username: "liuqhace@outlook.com"
+          usernameSecret: true
+      - usernamePassword:
+          description: "10.189.189.189"
+          id: "ce6fd50a-b440-4331-8dd8-4304f8d04c49"
+          password: "{AQAAABAAAAAQs0PsJHGaNl7dzv8IXf1qRsJG/Tuok4y0USpqlYqsmUc=}"
+          scope: GLOBAL
+          username: "root"
+      - basicSSHUserPrivateKey:
+          description: "10.189.189.189-key-凭据"
+          id: "ssh-key-for-test-server"
+          privateKeySource:
+            directEntry:
+              privateKey: "{AQAAABAAAAGwjLcmkfR5vyBwYmX/WtCeR+BNTALGcAFAbH4xfwyIvsDQFTwfKN4BwLH1mUyOyB2PdyjSvJAUrTqkcIKD0cxtR/wj19xZvLucX2c7kE8fIe1Wa8gV2DMDTvS1pdId4DrJvvDZw/eCr5nJ8+hiNt+h503C/hVfb6kPbBNVKoKTx1/4Ew06TdWK8MSUOhpfxAztFtDiX3aeO4BvCFpGOkbge32pnBAB3gAtJbMGQ9BmqeWu14L2io3pfC7SWh5dRTDI6e6s67+mhgMu9SGRbM9RE9R+lQx/4WrkZtSxD8lVeDekXoQVfiSSq+fgOZm1EsC6Sjr1sGwJ6/6vEr9xC5orFWUW/jxhFpZa5H13V4B6EAlEGZn5FXx/j9rbEsyTlSW7vm4j4gVZWFTXWFTtrhxXu+O4ced/h+jDSsWqlnZyFT3bqCHKf8xGI3jfRwrpvVvYlCFmBHB+m04A9l2y5P5LNZBdGG+hJnbFD8rwgY3kEZveRKrn2aLddVGwd7yC/xzX299249mbaeoGepgaonVhL4s0XzMrm462J4Ew38t9tAcyzzK/s8F/nKDAzdK/+2VPOgX7sC5gZPlmSHmxnq5Chkcw==}"
+          scope: GLOBAL
+          username: "root"
+jenkins:
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: false
+  disableRememberMe: false
+  disabledAdministrativeMonitors:
+  - "jenkins.monitor.JavaVersionRecommendationAdminMonitor-17-2026-03-31-WARNING"
+  - "jenkins.diagnostics.ControllerExecutorsNoAgents"
+  - "OldData"
+  - "hudson.util.DoubleLaunchChecker"
+  - "hudson.diagnosis.ReverseProxySetupMonitor"
+  labelAtoms:
+  - name: "built-in"
+  markupFormatter:
+    rawHtml:
+      disableSyntaxHighlighting: false
+  mode: NORMAL
+  nodeMonitors:
+  - "architecture"
+  - "clock"
+  - diskSpace:
+      freeSpaceThreshold: "1GiB"
+      freeSpaceWarningThreshold: "2GiB"
+  - "swapSpace"
+  - tmpSpace:
+      freeSpaceThreshold: "1GiB"
+      freeSpaceWarningThreshold: "2GiB"
+  - "responseTime"
+  nodeProperties:
+  - diskSpaceMonitor:
+      freeDiskSpaceThreshold: "1GiB"
+      freeDiskSpaceWarningThreshold: "2GiB"
+      freeTempSpaceThreshold: "1GiB"
+      freeTempSpaceWarningThreshold: "2GiB"
+  numExecutors: 3
+  primaryView:
+    all:
+      name: "all"
+  projectNamingStrategy: "standard"
+  quietPeriod: 5
+  remotingSecurity:
+    enabled: true
+  scmCheckoutRetryCount: 0
+  securityRealm:
+    local:
+      allowsSignup: false
+      enableCaptcha: false
+      users:
+      - id: "admin"
+        name: "admin"
+        properties:
+        - myView:
+            viewsTabBar: "standard"
+        - "userCommunityProperty"
+        - "consoleUrlProvider"
+        - mailer:
+            emailAddress: "admin"
+        - preferredProvider:
+            providerId: "default"
+        - timezone:
+            timeZoneName: "Asia/Shanghai"
+        - theme:
+            theme: "dark"
+        - "apiToken"
+        - "experimentalFlags"
+        - "viewsTabBar"
+        - "favorite"
+  slaveAgentPort: 50000
+  updateCenter:
+    sites:
+    - id: "default"
+      url: "https://updates.jenkins.io/update-center.json"
+  views:
+  - all:
+      name: "all"
+  viewsTabBar: "standard"
+globalCredentialsConfiguration:
+  configuration:
+    providerFilter: "none"
+    typeFilter: "none"
+appearance:
+  coverage:
+    defaultMetric: LINE
+    defaultName: "Coverage"
+    enableColumnByDefault: true
+  prism:
+    theme: PRISM
+  themeManager:
+    disableUserThemes: false
+    theme: "darkSystem"
+security:
+  apiToken:
+    creationOfLegacyTokenEnabled: false
+    tokenGenerationOnCreationEnabled: false
+    usageStatisticsEnabled: true
+  cps:
+    hideSandbox: false
+  gitHooks:
+    allowedOnAgents: false
+    allowedOnController: false
+  gitHostKeyVerificationConfiguration:
+    sshHostKeyVerificationStrategy: "knownHostsFileVerificationStrategy"
+  sSHD:
+    port: -1
+  scriptApproval:
+    forceSandbox: false
+  updateSiteWarningsConfiguration:
+    ignoredWarnings:
+    - "core-2_504"
+    - "core-2_500"
+unclassified:
+  ansiColorBuildWrapper:
+    colorMaps:
+    - black: "#000000"
+      blackB: "#4C4C4C"
+      blue: "#1E90FF"
+      blueB: "#4682B4"
+      cyan: "#00CDCD"
+      cyanB: "#00FFFF"
+      green: "#00CD00"
+      greenB: "#00FF00"
+      magenta: "#CD00CD"
+      magentaB: "#FF00FF"
+      name: "xterm"
+      red: "#CD0000"
+      redB: "#FF0000"
+      white: "#E5E5E5"
+      whiteB: "#FFFFFF"
+      yellow: "#CDCD00"
+      yellowB: "#FFFF00"
+    - black: "#000000"
+      blackB: "#555555"
+      blue: "#0000AA"
+      blueB: "#5555FF"
+      cyan: "#00AAAA"
+      cyanB: "#55FFFF"
+      defaultBackground: 0
+      defaultForeground: 7
+      green: "#00AA00"
+      greenB: "#55FF55"
+      magenta: "#AA00AA"
+      magentaB: "#FF55FF"
+      name: "vga"
+      red: "#AA0000"
+      redB: "#FF5555"
+      white: "#AAAAAA"
+      whiteB: "#FFFFFF"
+      yellow: "#AA5500"
+      yellowB: "#FFFF55"
+    - black: "black"
+      blackB: "black"
+      blue: "blue"
+      blueB: "blue"
+      cyan: "cyan"
+      cyanB: "cyan"
+      green: "green"
+      greenB: "green"
+      magenta: "magenta"
+      magentaB: "magenta"
+      name: "css"
+      red: "red"
+      redB: "red"
+      white: "white"
+      whiteB: "white"
+      yellow: "yellow"
+      yellowB: "yellow"
+    - black: "#2E3436"
+      blackB: "#2E3436"
+      blue: "#3465A4"
+      blueB: "#3465A4"
+      cyan: "#06989A"
+      cyanB: "#06989A"
+      defaultBackground: 0
+      defaultForeground: 7
+      green: "#4E9A06"
+      greenB: "#4E9A06"
+      magenta: "#75507B"
+      magentaB: "#75507B"
+      name: "gnome-terminal"
+      red: "#CC0000"
+      redB: "#CC0000"
+      white: "#D3D7CF"
+      whiteB: "#D3D7CF"
+      yellow: "#C4A000"
+      yellowB: "#C4A000"
+  bitbucketEndpointConfiguration:
+    endpoints:
+    - bitbucketCloudEndpoint:
+        enableCache: false
+        enableHookSignature: false
+        manageHooks: false
+        repositoriesCacheDuration: 0
+        teamCacheDuration: 0
+  buildDiscarders:
+    configuredBuildDiscarders:
+    - "jobBuildDiscarder"
+  email-ext:
+    adminRequiredForTemplateTesting: false
+    allowUnregisteredEnabled: false
+    charset: "UTF-8"
+    debugMode: false
+    defaultBody: |-
+      $PROJECT_NAME - Build # $BUILD_NUMBER - $BUILD_STATUS:
+
+      Check console output at $BUILD_URL to view the results.
+    defaultContentType: "text/plain"
+    defaultSubject: "$PROJECT_NAME - Build # $BUILD_NUMBER - $BUILD_STATUS!"
+    defaultTriggerIds:
+    - "hudson.plugins.emailext.plugins.trigger.FailureTrigger"
+    maxAttachmentSize: -1
+    maxAttachmentSizeMb: -1
+    precedenceBulk: false
+    throttlingEnabled: false
+    watchingEnabled: false
+  fingerprints:
+    fingerprintCleanupDisabled: false
+    storage: "file"
+  gitHubConfiguration:
+    apiRateLimitChecker: ThrottleForNormalize
+  gitHubPluginConfig:
+    hookUrl: "http://10.189.189.245:8080/github-webhook/"
+  junitTestResultStorage:
+    storage: "file"
+  location:
+    adminAddress: "没有配置邮箱地址 <nobody@nowhere>"
+    url: "http://10.189.189.245:8080/"
+  mailer:
+    charset: "UTF-8"
+    useSsl: false
+    useTls: false
+  mavenModuleSet:
+    localRepository: "default"
+  pollSCM:
+    pollingThreadCount: 10
+  scmGit:
+    addGitTagAction: false
+    allowSecondFetch: false
+    createAccountBasedOnEmail: false
+    disableGitToolChooser: false
+    hideCredentials: false
+    showEntireCommitSummaryInChanges: false
+    useExistingAccountWithSameEmail: false
+  timestamper:
+    allPipelines: false
+    elapsedTimeFormat: "'<b>'HH:mm:ss.S'</b> '"
+    systemTimeFormat: "'<b>'HH:mm:ss'</b> '"
+tool:
+  git:
+    installations:
+    - home: "git"
+      name: "Default"
+  mavenGlobalConfig:
+    globalSettingsProvider: "standard"
+    settingsProvider: "standard"
+  pipelineMaven:
+    daoClass: "org.jenkinsci.plugins.pipeline.maven.dao.PipelineMavenPluginNullDao"
+    globalTraceability: false
+    triggerDownstreamUponResultAborted: false
+    triggerDownstreamUponResultFailure: false
+    triggerDownstreamUponResultNotBuilt: false
+    triggerDownstreamUponResultSuccess: true
+    triggerDownstreamUponResultUnstable: false
+

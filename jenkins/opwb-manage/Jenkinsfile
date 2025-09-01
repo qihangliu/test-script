@@ -1,0 +1,105 @@
+// jenkinsfile
+pipeline {
+    agent any
+
+    environment {
+        // 定义Maven settings.xml的本地路径
+        SETTINGS_XML = "${WORKSPACE}/custom-settings.xml"
+        // 共享目录的根路径
+        SHARE_ROOT = "${env.JENKINS_HOME}/share"
+    }
+
+    stages {
+        // ====================================================================
+        // 阶段一：准备 Maven 配置
+        // ====================================================================
+        stage('Prepare Settings') {
+            steps {
+                script {
+                    def settingsXml = '''
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd ">
+  <mirrors>
+    <mirror>
+      <id>aliyunmaven</id>
+      <mirrorOf>central</mirrorOf>
+      <name>Aliyun Maven</name>
+      <url>https://maven.aliyun.com/repository/public </url>
+    </mirror>
+    <mirror>
+      <id>maven-central</id>
+      <mirrorOf>central</mirrorOf>
+      <name>Maven Central</name>
+      <url>https://repo.maven.apache.org/maven2 </url>
+    </mirror>
+  </mirrors>
+</settings>
+'''
+                    writeFile file: SETTINGS_XML, text: settingsXml
+                }
+            }
+        }
+
+        // ====================================================================
+        // 阶段二：构建并归档 opwb-management 项目（使用 JDK 8）
+        // ====================================================================
+        stage('Build and Archive Management Project') {
+            agent {
+                docker {
+                    // 使用JDK 8的Maven镜像
+                    image 'maven:3-eclipse-temurin-8'
+                    args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+                }
+            }
+            steps {
+                echo '检出 opwb-management 主项目...'
+                dir('opwb-management-workspace') {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/master']],
+                        userRemoteConfigs: [[
+                            url: 'https://gitee.com/changyunhuizhi/opwb-management.git',
+                            credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                        ]]
+                    ])
+
+                    sh "git config --global --add safe.directory ${env.WORKSPACE}/opwb-management-workspace"
+
+                    echo '正在执行 Maven 构建...'
+                    sh "mvn -s ${SETTINGS_XML} clean install -DskipTests"
+
+                    echo '正在归档文件...'
+                    script {
+                        def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
+                        def targetDir = "${SHARE_ROOT}/opwb-manage-${timestamp}"
+
+                        sh """
+                            set -e
+                            mkdir -p "${targetDir}/opwb-manage"
+                            
+                            git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
+
+                            cp target/management-0.0.1-SNAPSHOT.jar "${targetDir}/opwb-manage/"
+
+                            cat <<EOF
+--------------------------------------------------------
+文件已成功归档
+Windows 可通过以下路径访问：
+\\\\\\\\10.189.189.245\\\\share\\\\opwb-manage-${timestamp}
+--------------------------------------------------------
+EOF
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '所有构建已结束。'
+        }
+    }
+}
