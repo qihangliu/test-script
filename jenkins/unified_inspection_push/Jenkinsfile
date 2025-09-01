@@ -20,7 +20,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        docker.image('testenv:3.0-250811').inside("--volume ${WORKSPACE}:/app -w /app") {
+                        docker.image('testenv:3.0-250825').inside("--volume ${WORKSPACE}:/app -w /app") {
                             // 关键: returnStatus: true 会让 sh 返回脚本的退出码
                             def statusCode = sh(script: 'python ./utils/monitor/unified_inspection_push.py', returnStatus: true)
                             
