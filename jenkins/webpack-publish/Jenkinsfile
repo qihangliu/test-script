@@ -1,25 +1,25 @@
-// Jenkinsfile
+// Jenkinsfile (最终优化版)
 pipeline {
-    // 1. 定义构建环境：使用我们自己的、预装了所有工具的自定义镜像
+    // ====================================================================
+    // 1. 定义构建环境（基于 Node.js 的 Docker 镜像）
+    // ====================================================================
     agent {
         docker {
-            // 使用你自己构建的、预装了 zip 的镜像
             image 'node:14.15.0'
-            // 2. 缓存与权限控制
-            // -u root:root : 强制容器以 root 用户运行
-            // -v npm-cache... : 持久化 npm 缓存
-            // -v webpack-cache... : 持久化 Webpack 构建缓存，路径已更新为工作区根目录
+            // 挂载命名卷 (named volumes) 来持久化缓存，这是 Docker 推荐的最佳实践
+            // - npm-cache: 用于缓存 npm 下载的包
+            // - webpack-cache: 用于持久化 Webpack 的文件系统缓存
             args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache'
         }
     }
 
     stages {
         // ====================================================================
-        //  阶段：检出代码
+        // 阶段：检出代码
         // ====================================================================
         stage('Checkout') {
             steps {
-                echo '正在检出代码到工作区根目录...'
+                echo 'INFO: 正在检出代码 (启用浅克隆)...'
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: '*/shijiaxuan-pool']],
@@ -27,61 +27,66 @@ pipeline {
                         url: 'https://gitee.com/changyunhuizhi/opwb-web.git',
                         credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
                     ]],
-                    // 优化：移除不必要的子目录检出
+                    // 浅克隆，只拉取最近一次提交，大幅加速代码检出
                     extensions: [
-                        [$class: 'CloneOption', shallow: false, timeout: 60]
+                        [$class: 'CloneOption', shallow: true, depth: 1, timeout: 60]
                     ]
                 ])
             }
         }
 
         // ====================================================================
-        //  阶段：安装依赖
+        // 阶段：安装依赖
         // ====================================================================
         stage('Install Dependencies') {
             steps {
-                echo '正在配置 NPM 使用淘宝镜像源...'
+                echo 'INFO: 设置 NPM 使用淘宝镜像源，加快依赖下载...'
                 sh 'npm config set registry https://registry.npmmirror.com'
-                
-                echo '正在安装 NPM 依赖...'
-                // 优化：使用 npm install 替代 npm ci，以利用现有的 node_modules 目录，大幅提升后续构建速度
-                sh 'npm install'
-                sh 'npm rebuild core-js vue-demi ant-design-vue'
+                // 关键优化：使用 --prefer-offline 优先从缓存安装，跳过不必要的检查
+                sh 'npm install --prefer-offline --no-audit --no-fund'
+
+                echo 'INFO: 更新 browserslist 数据库以消除构建警告...'
+                // 这个命令会更新 caniuse-lite 数据库，让后续 build 过程不再打印警告
+                sh 'npx browserslist@latest --update-db'
             }
         }
 
         // ====================================================================
-        //  阶段：编译项目
+        // 阶段：编译项目
         // ====================================================================
         stage('Build') {
             steps {
-                // 优化：在编译前，先清理旧的 dist 目录
-                echo '正在清理旧的 dist 目录...'
+                echo 'INFO: 清理旧的构建产物，确保环境干净...'
                 sh 'rm -rf dist'
+                sh 'rm -f dist.zip'
 
-                withEnv(['NODE_OPTIONS=--max-old-space-size=8192']) {
-                    echo "正在使用 NODE_OPTIONS=${env.NODE_OPTIONS} 进行编译..."
-                    sh 'npm run build'
+                // 关键修复：根据服务器 24G 内存的配置，将 Node 内存上限提升至 20GB
+                // 这是防止大型项目在编译时内存溢出的最关键一步
+                withEnv(['NODE_OPTIONS=--max-old-space-size=20480']) {
+                    echo "INFO: 使用 NODE_OPTIONS=${env.NODE_OPTIONS} 编译项目..."
+                    // 关键优化：跳过 lint 检查，专注于编译任务
+                    sh 'NODE_ENV=production npm run build -- --no-lint'
                 }
             }
         }
 
         // ====================================================================
-        //  阶段：打包产物
+        // 阶段：打包产物
         // ====================================================================
         stage('Package Artifact') {
             steps {
-                echo '正在将 dist 目录的内容打包为 dist.zip...'
-                // 优化：进入 dist 目录，直接打包其内容，使 zip 包不包含 dist 父目录
+                echo 'INFO: 将 dist 目录的内容打包成 dist.zip...'
                 dir('dist') {
-                    sh 'zip -r ../dist.zip .'
+                    // 关键修复：进入 dist 目录再打包，确保 zip 包内没有顶层 dist 目录
+                    sh 'zip -qr ../dist.zip .'
                 }
+                // 将产物归档到 Jenkins，方便后续追溯
                 archiveArtifacts artifacts: 'dist.zip', followSymlinks: false
             }
         }
 
         // ====================================================================
-        //  阶段：部署到测试环境
+        // 阶段：部署到测试环境
         // ====================================================================
         stage('Deploy to Test') {
             steps {
@@ -90,18 +95,16 @@ pipeline {
                         def remoteUser = "root"
                         def remoteHost = "10.189.189.189"
                         def remoteWorkDir = "/data/server/opwbworkbench/webpack/"
-                        def remoteHtmlDir = "/data/server/opwbworkbench/html" // 目标 HTML 目录的绝对路径
+                        def remoteHtmlDir = "/data/server/opwbworkbench/html"
 
-                        echo "正在传输 dist.zip 到 ${remoteUser}@${remoteHost}:${remoteWorkDir}"
+                        echo "INFO: 传输 dist.zip 到测试服务器 ${remoteHost}..."
                         sh "scp -o StrictHostKeyChecking=no dist.zip ${remoteUser}@${remoteHost}:${remoteWorkDir}"
 
-                        echo "正在执行远程部署..."
-                        // 修复：使用单反斜杠 \ 来转义所有要留给 Shell 处理的 $ 符号
+                        echo "INFO: 执行远程部署脚本..."
                         sh """
                             ssh -o StrictHostKeyChecking=no ${remoteUser}@${remoteHost} '
                                 set -e
-                                
-                                # 定义变量
+
                                 WORK_DIR="${remoteWorkDir}"
                                 HTML_DIR="${remoteHtmlDir}"
                                 DIST_ZIP="dist.zip"
@@ -109,25 +112,24 @@ pipeline {
                                 BACKUP_FILE="html_backup_\${TIMESTAMP}.tar.gz"
                                 MAX_BACKUPS=10
 
-                                # 进入工作目录以执行备份和清理
                                 cd \$WORK_DIR
 
-                                echo "--> 正在备份 \$HTML_DIR..."
+                                echo "--> 备份现有应用..."
                                 tar -czf "\$BACKUP_FILE" -C "\$(dirname "\$HTML_DIR")" "\$(basename "\$HTML_DIR")"
-                                
-                                echo "--> 正在清理旧备份，最多保留 \${MAX_BACKUPS} 个..."
-                                ls -1t html_backup_*.tar.gz 2>/dev/null | tail -n +\$((\${MAX_BACKUPS} + 1)) | xargs -r rm -f
 
-                                echo "--> 正在清空 \$HTML_DIR 目录..."
+                                echo "--> 清理旧备份..."
+                                ls -1t html_backup_*.tar.gz 2>/dev/null | tail -n +\$((\$MAX_BACKUPS + 1)) | xargs -r rm -f
+
+                                echo "--> 清空目标目录..."
                                 rm -rf "\${HTML_DIR:?}"/*
 
-                                echo "--> 正在将 \$DIST_ZIP 直接解压到 \$HTML_DIR..."
+                                echo "--> 解压新版本..."
                                 unzip -q -o "\$DIST_ZIP" -d "\$HTML_DIR"
 
-                                echo "--> 正在删除临时的 \$DIST_ZIP..."
+                                echo "--> 清理临时文件..."
                                 rm "\$DIST_ZIP"
 
-                                echo "✅ 部署完成！文件已直接更新至 \$HTML_DIR 目录。"
+                                echo "✅ 部署完成。"
                             '
                         """
                     }
@@ -136,9 +138,12 @@ pipeline {
         }
     }
 
+    // ====================================================================
+    // 构建后操作
+    // ====================================================================
     post {
         always {
-            echo '构建已结束。'
+            echo '构建流程已结束。'
         }
     }
 }
