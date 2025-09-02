@@ -1,17 +1,12 @@
 # ====================================================================
-# Jenkins Configuration as Code - 精简版
-#
-# 已移除:
-# 1. 空的 Bitbucket 插件配置。
-# 2. AnsiColor 插件中除 "xterm" 外多余的颜色方案。
+# Jenkins Configuration as Code - 最终精简版
 #
 # 仍需您关注:
 # 1. [重要] `jenkins.authorizationStrategy`: 当前设置为 `loggedInUsersCanDoAnything`，
 #    任何登录用户都有管理员权限，建议在生产环境中更换为更严格的策略。
 # 2. `credentials`: 请定期审计，确保所有凭据都在被积极使用，及时移除废弃的凭据。
-# 3. `unclassified.gitHubPluginConfig.hookUrl`: 请确认 GitHub Webhook 地址
-#    `http://10.189.189.245:8080/github-webhook/` 是否可从公网访问，
-#    否则 Webhook 触发将失败。
+# 3. `unclassified.pollSCM`: 由于禁用了 Webhook，构建触发可能依赖此轮询配置。
+#    请检查其中的 `pollingThreadCount` 是否符合您的性能预期。
 # ====================================================================
 
 credentials:
@@ -191,67 +186,3 @@ unclassified:
     - "jobBuildDiscarder"
   email-ext:
     adminRequiredForTemplateTesting: false
-    allowUnregisteredEnabled: false
-    charset: "UTF-8"
-    debugMode: false
-    defaultBody: |-
-      $PROJECT_NAME - Build # $BUILD_NUMBER - $BUILD_STATUS:
-
-      Check console output at $BUILD_URL to view the results.
-    defaultContentType: "text/plain"
-    defaultSubject: "$PROJECT_NAME - Build # $BUILD_NUMBER - $BUILD_STATUS!"
-    defaultTriggerIds:
-    - "hudson.plugins.emailext.plugins.trigger.FailureTrigger"
-    maxAttachmentSize: -1
-    maxAttachmentSizeMb: -1
-    precedenceBulk: false
-    throttlingEnabled: false
-    watchingEnabled: false
-  fingerprints:
-    fingerprintCleanupDisabled: false
-    storage: "file"
-  gitHubConfiguration:
-    apiRateLimitChecker: ThrottleForNormalize
-  gitHubPluginConfig:
-    hookUrl: "http://10.189.189.245:8080/github-webhook/"
-  junitTestResultStorage:
-    storage: "file"
-  location:
-    adminAddress: "没有配置邮箱地址 <nobody@nowhere>"
-    url: "http://10.189.189.245:8080/"
-  mailer:
-    charset: "UTF-8"
-    useSsl: false
-    useTls: false
-  mavenModuleSet:
-    localRepository: "default"
-  pollSCM:
-    pollingThreadCount: 10
-  scmGit:
-    addGitTagAction: false
-    allowSecondFetch: false
-    createAccountBasedOnEmail: false
-    disableGitToolChooser: false
-    hideCredentials: false
-    showEntireCommitSummaryInChanges: false
-    useExistingAccountWithSameEmail: false
-  timestamper:
-    allPipelines: false
-    elapsedTimeFormat: "'<b>'HH:mm:ss.S'</b> '"
-    systemTimeFormat: "'<b>'HH:mm:ss'</b> '"
-tool:
-  git:
-    installations:
-    - home: "git"
-      name: "Default"
-  mavenGlobalConfig:
-    globalSettingsProvider: "standard"
-    settingsProvider: "standard"
-  pipelineMaven:
-    daoClass: "org.jenkinsci.plugins.pipeline.maven.dao.PipelineMavenPluginNullDao"
-    globalTraceability: false
-    triggerDownstreamUponResultAborted: false
-    triggerDownstreamUponResultFailure: false
-    triggerDownstreamUponResultNotBuilt: false
-    triggerDownstreamUponResultSuccess: true
-    triggerDownstreamUponResultUnstable: false
