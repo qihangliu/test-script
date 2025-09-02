@@ -9,14 +9,26 @@ pipeline {
 
     stages {
         // ====================================================================
+        // 新增阶段：在构建开始时手动清理工作空间
+        // ====================================================================
+        stage('Clean Workspace') {
+            steps {
+                echo 'INFO: Manually cleaning workspace...'
+                // 在容器内以 root 权限执行清理，为本次构建准备干净的环境。
+                sh '''
+                    set -x
+                    (cd lts-dependency && git clean -fdx) || true
+                    (cd main-project && git clean -fdx) || true
+                '''
+            }
+        }
+
+        // ====================================================================
         // 阶段一：在子目录中构建 lts 依赖
         // ====================================================================
         stage('Build Dependency: lts') {
             steps {
                 dir('lts-dependency') {
-                    echo "INFO: 正在强制重置 lts-dependency 目录权限..."
-                    sh 'mkdir -p . && chmod -R u+w .'
-
                     echo '进入 lts-dependency 目录，准备检出 light-task-scheduler...'
                     checkout([
                         $class: 'GitSCM',
@@ -24,8 +36,7 @@ pipeline {
                         userRemoteConfigs: [[
                             url: 'https://gitee.com/changyunhuizhi/light-task-scheduler.git',
                             credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
-                        ]],
-                        extensions: [[$class: 'CleanBeforeCheckout']]
+                        ]]
                     ])
 
                     configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
@@ -56,9 +67,6 @@ pipeline {
         stage('Build Main Project') {
             steps {
                 dir('main-project') {
-                    echo "INFO: 正在强制重置 main-project 目录权限..."
-                    sh 'mkdir -p . && chmod -R u+w .'
-
                     echo '进入 main-project 目录，准备检出 opwb-engines 主项目...'
                     checkout([
                         $class: 'GitSCM',
@@ -66,8 +74,7 @@ pipeline {
                         userRemoteConfigs: [[
                             url: 'https://gitee.com/changyunhuizhi/opwb-engines.git',
                             credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
-                        ]],
-                        extensions: [[$class: 'CleanBeforeCheckout']]
+                        ]]
                     ])
 
                     configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
@@ -123,7 +130,6 @@ pipeline {
 ✅ 构建产物已成功归档!
 
    任务名称: ${env.JOB_NAME}
-   时间戳:  ${timestamp}
 
    Windows 可通过以下路径访问：
    \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}-${timestamp}
@@ -136,4 +142,3 @@ EOF
         }
     }
 }
-
