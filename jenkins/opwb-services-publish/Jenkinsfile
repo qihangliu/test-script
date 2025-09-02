@@ -1,5 +1,5 @@
 // Jenkinsfile
-pipeline{
+pipeline {
     // 1. 定义构建环境
     agent {
         docker {
@@ -11,30 +11,29 @@ pipeline{
     stages {
         stage('Checkout') {
             steps {
-                echo 'INFO: 开始从 Git 仓库拉取代码...'
+                echo 'INFO: 开始从 Git 仓库拉取代码 (启用浅克隆)...'
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: '*/workbench']],
                     userRemoteConfigs: [[
                         url: 'https://gitee.com/changyunhuizhi/opwb-services.git',
                         credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
-                    ]]
+                    ]],
+                    extensions: [[$class: 'CloneOption', shallow: true, depth: 1, timeout: 60]]
                 ])
                 echo 'SUCCESS: 代码拉取完成。'
             }
         }
 
-        // ====================================================================
-        //  修改后的构建阶段 (使用 Config File Provider)
-        // ====================================================================
         stage('Build & Test') {
             steps {
-                // 通过 ID 'maven-aliyun-settings' 注入您在 Jenkins 中管理的配置文件
                 configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
                     script {
                         echo 'INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)...'
-                        // 使用由 Jenkins 提供的 ${MAVEN_SETTINGS} 变量来指定配置文件路径
-                        sh 'mvn -s ${MAVEN_SETTINGS} clean install -DskipTests'
+                        withEnv(['MAVEN_OPTS=-Xmx8g -Xms4g']) {
+                            echo "INFO: 使用优化参数 MAVEN_OPTS=${env.MAVEN_OPTS} 和 8 个线程进行构建..."
+                            sh 'mvn -s ${MAVEN_SETTINGS} -T 8 clean install -DskipTests'
+                        }
                         echo 'SUCCESS: Maven 构建完成。'
                     }
                 }
@@ -49,9 +48,6 @@ pipeline{
             }
         }
 
-        // ====================================================================
-        //  阶段：部署到测试环境
-        // ====================================================================
         stage('Deploy to Test') {
             steps {
                 sshagent(credentials: ['ssh-key-for-test-server']) {
@@ -68,84 +64,80 @@ pipeline{
                         def remoteAppDir = "/data/server/opwbworkbench"
                         def remoteBackupDir = "${remoteAppDir}/opwb-web-backup"
 
-                        // 1. 传输文件
                         echo "INFO: [步骤 1/2] 正在传输文件 ${jarFileName} 到服务器..."
                         sh "scp -o StrictHostKeyChecking=no ${jarFile} ${remoteUser}@${remoteHost}:${remoteBackupDir}/"
                         echo "SUCCESS: 文件传输成功！"
 
-                        // 2. 定义并执行远程部署脚本
                         echo "INFO: [步骤 2/2] 准备在远程服务器上执行部署脚本..."
 
-                        def REMOTE_SCRIPT = '''
-                            set -e # 任何命令失败则立即退出
-                            
-                            # --- 变量定义 ---
-                            APP_DIR="%s"
-                            BACKUP_DIR="%s"
-                            NEW_JAR_NAME="%s"
-                            
-                            SOURCE_FILE="${APP_DIR}/${NEW_JAR_NAME}"
-                            TARGET_FILE="${BACKUP_DIR}/${NEW_JAR_NAME}"
-                            
-                            echo "===================== 远程部署开始 ====================="
-                            echo " 应用目录 (SOURCE): ${SOURCE_FILE}"
-                            echo " 备份目录 (TARGET): ${TARGET_FILE}"
-                            echo "--------------------------------------------------------"
+                        // ====================================================================
+                        //  Here Document: 动态生成并执行包含两种时间戳格式的远程脚本
+                        // ====================================================================
+                        sh """
+ssh -o StrictHostKeyChecking=no ${remoteUser}@${remoteHost} /bin/bash << 'END_SCRIPT'
+set -e
 
-                            # 检查新上传的 Jar 包是否存在
-                            if [ ! -f "${TARGET_FILE}" ]; then
-                                echo "❌ 致命错误：新上传的文件 ${TARGET_FILE} 在服务器上未找到！"
-                                exit 1
-                            fi
-                            
-                            # 如果应用目录中旧的 Jar 包不存在，或者与新包内容不同，则执行更新
-                            if [ ! -f "${SOURCE_FILE}" ] || ! cmp -s "${SOURCE_FILE}" "${TARGET_FILE}"; then
-                                echo ">>> 检测到文件内容不一致或首次部署，开始执行更新流程..."
-                                
-                                # --- 1. 备份旧包 ---
-                                if [ -f "${SOURCE_FILE}" ]; then
-                                    TIMESTAMP=$(date +"%%Y%%m%%d-%%H%%M%%S")
-                                    BACKUP_FILE="${BACKUP_DIR}/${NEW_JAR_NAME}.${TIMESTAMP}"
-                                    echo "[1/4] 正在备份当前应用文件: ${SOURCE_FILE}"
-                                    echo "      备份到: ${BACKUP_FILE}"
-                                    cp "${SOURCE_FILE}" "${BACKUP_FILE}"
-                                fi
-                                
-                                # --- 2. 清理旧备份 ---
-                                echo "[2/4] 正在清理旧备份，最多保留 10 个..."
-                                cd "${BACKUP_DIR}"
-                                ls -1t ${NEW_JAR_NAME}.* 2>/dev/null | tail -n +11 | xargs -r rm -f
-                                echo "      旧备份清理完成。"
-                                
-                                # --- 3. 部署新包 ---
-                                echo "[3/4] 正在部署新版本文件..."
-                                mv "${TARGET_FILE}" "${SOURCE_FILE}"
-                                echo "      新文件已从 ${TARGET_FILE} 移动到 ${SOURCE_FILE}"
-                                
-                                # --- 4. 重启服务 ---
-                                echo "[4/4] 正在重启服务..."
-                                RESTART_SCRIPT="${APP_DIR}/opwb.sh"
-                                if [ -x "${RESTART_SCRIPT}" ]; then
-                                    cd "${APP_DIR}" && ./opwb.sh restart
-                                    echo "      服务重启命令已发送。"
-                                else
-                                    echo "❌ 严重错误: 重启脚本 ${RESTART_SCRIPT} 不存在或没有执行权限！"
-                                    exit 1
-                                fi
-                                echo "--------------------------------------------------------"
-                                echo "✅ 更新部署成功！"
-                            else
-                                echo "✅ 文件内容一致，无需更新。"
-                                # 删除本次上传的临时文件
-                                rm -f "${TARGET_FILE}"
-                            fi
-                            echo "===================== 远程部署结束 ====================="
-                        '''
-                        
-                        def formattedScript = REMOTE_SCRIPT.format(remoteAppDir, remoteBackupDir, jarFileName)
-                        
-                        sh "ssh -o StrictHostKeyChecking=no ${remoteUser}@${remoteHost} '${formattedScript}'"
-                        
+# --- 1. 定义两种不同格式的时间戳变量 ---
+BACKUP_TIMESTAMP=\$(date +"%Y%m%d%H%M%S")
+SHARE_TIMESTAMP=\$(date +"%y-%m-%d_%H-%M-%S")
+
+# --- 2. 直接在这里定义其他变量 ---
+APP_DIR="${remoteAppDir}"
+BACKUP_DIR="${remoteBackupDir}"
+NEW_JAR_NAME="${jarFileName}"
+
+SOURCE_FILE="\${APP_DIR}/\${NEW_JAR_NAME}"
+TARGET_FILE="\${BACKUP_DIR}/\${NEW_JAR_NAME}"
+
+echo "===================== 远程部署开始 ====================="
+echo " 应用目录 (SOURCE): \${SOURCE_FILE}"
+echo " 备份目录 (TARGET): \${TARGET_FILE}"
+echo "--------------------------------------------------------"
+
+if [ ! -f "\${TARGET_FILE}" ]; then
+    echo "❌ 致命错误：新上传的文件 \${TARGET_FILE} 在服务器上未找到！"
+    exit 1
+fi
+
+if [ ! -f "\${SOURCE_FILE}" ] || ! cmp -s "\${SOURCE_FILE}" "\${TARGET_FILE}"; then
+    echo ">>> 检测到文件内容不一致或首次部署，开始执行更新流程..."
+
+    if [ -f "\${SOURCE_FILE}" ]; then
+        # --- 3. 使用备份专用时间戳 ---
+        BACKUP_FILE="\${BACKUP_DIR}/\${NEW_JAR_NAME}.\${BACKUP_TIMESTAMP}"
+        echo "[1/4] 正在备份当前应用文件: \${SOURCE_FILE}"
+        echo "      备份到: \${BACKUP_FILE}"
+        cp "\${SOURCE_FILE}" "\${BACKUP_FILE}"
+    fi
+
+    echo "[2/4] 正在清理旧备份，最多保留 10 个..."
+    cd "\${BACKUP_DIR}"
+    ls -1t \${NEW_JAR_NAME}.* 2>/dev/null | tail -n +11 | xargs -r rm -f
+    echo "      旧备份清理完成。"
+
+    echo "[3/4] 正在部署新版本文件..."
+    mv "\${TARGET_FILE}" "\${SOURCE_FILE}"
+    echo "      新文件已从 \${TARGET_FILE} 移动到 \${SOURCE_FILE}"
+
+    echo "[4/4] 正在重启服务..."
+    RESTART_SCRIPT="\${APP_DIR}/opwb.sh"
+    if [ -x "\${RESTART_SCRIPT}" ]; then
+        cd "\${APP_DIR}" && ./opwb.sh restart
+        echo "      服务重启命令已发送。"
+    else
+        echo "❌ 严重错误: 重启脚本 \${RESTART_SCRIPT} 不存在或没有执行权限！"
+        exit 1
+    fi
+    echo "--------------------------------------------------------"
+    echo "✅ 更新部署成功！"
+else
+    echo "✅ 文件内容一致，无需更新。"
+    rm -f "\${TARGET_FILE}"
+fi
+echo "===================== 远程部署结束 ====================="
+
+END_SCRIPT
+"""
                         echo "SUCCESS: 远程部署脚本执行完毕。"
                     }
                 }
