@@ -1,43 +1,71 @@
+// Jenkinsfile
 pipeline {
+    // 1. 定义 Agent
     agent any
+
+    // 2. 定义触发器
+    triggers {
+        // 使用 cron 表达式实现定时构建
+        // H(40-50) 8 * * * 表示每天 8:40 至 8:50 之间，由 Jenkins 选择一个固定的随机分钟执行。
+        cron('H(40-50) 8 * * *')
+    }
+
     stages {
-        // 阶段一：从代码库拉取最新的代码
-        stage('Checkout') {
+        // ====================================================================
+        //  阶段 1: 清理工作区
+        // ====================================================================
+        stage('Clean Workspace') {
+            steps {
+                echo "INFO: 准备为构建 #${env.BUILD_NUMBER} 清理工作区..."
+                cleanWs()
+                echo "SUCCESS: 工作区清理完成。"
+            }
+        }
+
+        // ====================================================================
+        //  阶段 2: 检出代码
+        // ====================================================================
+        stage('Checkout SCM') {
             steps {
                 script {
+                    echo "INFO: 开始从 Gitee 仓库检出代码 (dev 分支)..."
                     retry(count: 3) {
-                        cleanWs()
                         git branch: 'dev',
                             credentialsId: '463e6b72-63de-4775-8ca4-01f465f4f33e',
                             url: 'https://gitee.com/changyunhuizhi/opwb-automation.git'
                     }
+                    echo "SUCCESS: 代码检出成功。"
                 }
             }
         }
-        
-        // 阶段二：运行推送脚本
-        stage('Run Push Notification Task') {
+
+        // ====================================================================
+        //  阶段 3: 执行推送任务
+        // ====================================================================
+        stage('Execute Push Task') {
             steps {
                 script {
+                    echo "INFO: 准备在 Docker 容器 (testenv:3.0-250825) 中执行 Python 推送脚本..."
                     try {
                         docker.image('testenv:3.0-250825').inside("--volume ${WORKSPACE}:/app -w /app") {
                             // 关键: returnStatus: true 会让 sh 返回脚本的退出码
                             def statusCode = sh(script: 'python ./utils/monitor/unified_inspection_push.py', returnStatus: true)
-                            
+
                             // 只判断是否成功 (退出码为0)
                             if (statusCode == 0) {
-                                echo "脚本执行成功：推送已完成。内部任务的状态请查看日志。"
+                                echo "SUCCESS: 脚本执行成功，推送已完成。"
                             } else {
                                 // 任何非0的退出码都表示推送失败或环境问题
-                                error("严重错误：推送通知或环境检查失败，退出码为 ${statusCode}。构建将标记为失败。")
+                                error("ERROR: 推送脚本执行失败，退出码为 ${statusCode}。")
                             }
                         }
                     } catch (any) {
                         // 捕获 Docker 或 sh 命令本身的执行错误
-                        error("Jenkins 步骤执行时发生致命错误: ${any.message}")
+                        error("FATAL: Jenkins 步骤执行时发生致命错误: ${any.message}")
                     }
                 }
             }
         }
     }
 }
+
