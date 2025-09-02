@@ -1,87 +1,113 @@
-// jenkinsfile
+// Jenkinsfile
 pipeline {
-    agent any
+    // 统一在顶层定义全局构建环境
+    agent {
+        docker {
+            image 'maven:3-eclipse-temurin-8'
+            args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        }
+    }
 
     stages {
         // ====================================================================
-        //  阶段：构建并归档 opwb-management 项目
+        //  阶段 1: 清理工作区
         // ====================================================================
-        stage('Build and Archive Management Project') {
-            agent {
-                docker {
-                    // 使用JDK 8的Maven镜像
-                    image 'maven:3-eclipse-temurin-8'
-                    args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        stage('Clean Workspace') {
+            steps {
+                echo 'INFO: 在 root 容器内清理主工作区...'
+                // 使用 rm -rf 是因为 cleanWs() 会因权限问题失败
+                sh 'rm -rf ./* ./.??*'
+                echo 'SUCCESS: 工作区清理完成。'
+            }
+        }
+
+        // ====================================================================
+        //  阶段 2: 检出代码
+        // ====================================================================
+        stage('Checkout SCM') {
+            steps {
+                echo 'INFO: 开始从 Gitee 仓库检出 opwb-management 项目...'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/master']],
+                    userRemoteConfigs: [[
+                        url: 'https://gitee.com/changyunhuizhi/opwb-management.git',
+                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                    ]]
+                ])
+                // 将当前工作区标记为 Git 的安全目录
+                sh "git config --global --add safe.directory ${env.WORKSPACE}"
+                echo 'SUCCESS: 代码检出完成。'
+            }
+        }
+
+        // ====================================================================
+        //  阶段 3: 构建与测试
+        // ====================================================================
+        stage('Build') {
+            steps {
+                configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
+                    echo "INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)..."
+                    echo 'INFO: 开始执行 Maven 构建 (mvn clean install)...'
+                    sh "mvn -s ${MAVEN_SETTINGS} -T 8 clean install -DskipTests"
+                    echo 'SUCCESS: Maven 构建完成。'
                 }
             }
+        }
+
+        // ====================================================================
+        //  阶段 4: 归档产物
+        // ====================================================================
+        stage('Archive') {
             steps {
-                // 保留原始文件中的子目录隔离方式
-                dir('opwb-management-workspace') {
-                    // 手动执行清理命令
-                    echo '正在以 root 权限强制清理工作子目录...'
-                    sh 'rm -rf ./* ./.??*'
+                script {
+                    echo 'INFO: 开始归档构建产物...'
 
-                    echo '检出 opwb-management 主项目...'
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: '*/master']],
-                        userRemoteConfigs: [[
-                            url: 'https://gitee.com/changyunhuizhi/opwb-management.git',
-                            credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
-                        ]]
-                    ])
-
-                    sh "git config --global --add safe.directory ${env.WORKSPACE}/opwb-management-workspace"
-
-                    // 使用 configFileProvider 加载全局配置
-                    // 不再有 'Prepare Settings' 阶段，直接在这里加载
-                    configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
-                        echo "INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)..."
-
-                        echo '正在执行 Maven 构建...'
-                        // 优化：使用 -T 8 启用并行构建以提速
-                        sh "mvn -s ${MAVEN_SETTINGS} -T 8 clean install -DskipTests"
+                    // 1. 动态查找构建产物，使其更健壮
+                    def files = findFiles(glob: 'target/*.jar')
+                    if (files.length == 0) {
+                        error "错误：在 target/ 目录中未找到任何 .jar 文件，无法归档！"
                     }
+                    def jarFile = files[0] // 获取找到的第一个 JAR 文件
 
-                    echo '正在归档文件...'
-                    script {
-                        def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
-                        def shareRoot = "/var/jenkins_home/share"
-                        def targetDir = "${shareRoot}/opwb-manage-${timestamp}"
+                    // 2. 准备归档目录和信息
+                    def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
+                    def shareRoot = "/var/jenkins_home/share"
+                    def targetDir = "${shareRoot}/opwb-manage-${timestamp}"
 
-                        sh """
-                            set -e
-                            mkdir -p "${targetDir}/opwb-manage"
+                    // 3. 执行归档到共享目录的 Shell 脚本
+                    sh """
+                        set -e
+                        echo "[1/3] 正在创建共享归档目录: ${targetDir}"
+                        mkdir -p "${targetDir}/opwb-manage"
 
-                            git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
+                        echo "[2/3] 正在归档 Git 提交日志..."
+                        git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
 
-                            cp target/management-0.0.1-SNAPSHOT.jar "${targetDir}/opwb-manage/"
+                        echo "[3/3] 正在拷贝 JAR 包: ${jarFile.name} ..."
+                        cp ${jarFile.path} "${targetDir}/opwb-manage/"
 
-                            cat <<EOF
+                        cat <<EOF
 
 ========================================================================
-✅ 构建产物已成功归档!
+✅ 构建产物已成功归档至共享目录!
 
    任务名称: opwb-manage
-   时间戳:  ${timestamp}
 
    Windows 可通过以下路径访问：
    \\\\\\\\10.189.189.245\\\\share\\\\opwb-manage-${timestamp}
 ========================================================================
 
 EOF
-                        """
-                    }
+                    """
+
+                    // 4. 新增：使用 Jenkins 内置功能归档，方便从UI下载
+                    echo "INFO: 正在归档 ${jarFile.name} 到 Jenkins 本身..."
+                    archiveArtifacts artifacts: jarFile.path, fingerprint: true
+
+                    echo 'SUCCESS: 所有归档操作完成。'
                 }
             }
         }
     }
-
-    post {
-        always {
-            echo '构建流程结束，正在清理工作区...'
-            cleanWs()
-        }
-    }
 }
-
