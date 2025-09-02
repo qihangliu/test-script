@@ -1,23 +1,39 @@
+# ====================================================================
+# Jenkins Configuration as Code - 精简版
+#
+# 已移除:
+# 1. 空的 Bitbucket 插件配置。
+# 2. AnsiColor 插件中除 "xterm" 外多余的颜色方案。
+#
+# 仍需您关注:
+# 1. [重要] `jenkins.authorizationStrategy`: 当前设置为 `loggedInUsersCanDoAnything`，
+#    任何登录用户都有管理员权限，建议在生产环境中更换为更严格的策略。
+# 2. `credentials`: 请定期审计，确保所有凭据都在被积极使用，及时移除废弃的凭据。
+# 3. `unclassified.gitHubPluginConfig.hookUrl`: 请确认 GitHub Webhook 地址
+#    `http://10.189.189.245:8080/github-webhook/` 是否可从公网访问，
+#    否则 Webhook 触发将失败。
+# ====================================================================
+
 credentials:
   system:
     domainCredentials:
     - credentials:
       - usernamePassword:
-          description: "tang-gitee凭据"
+          description: "tang-gitee"
           id: "d5208b73-a80f-403b-a5df-365614d1362e"
           password: "{AQAAABAAAAAQs8mYV3P365rIMIpDY4RYqfB7Tst/znpL0E1UXxgWXw8=}"
           scope: GLOBAL
           username: "15902922058"
           usernameSecret: true
       - usernamePassword:
-          description: "github凭据"
+          description: "liu-github"
           id: "fc710dea-7e0a-4685-a11a-985bae239d61"
           password: "{AQAAABAAAAAwhz9ZKATCdfW8akl5ubDfo7030vs5P6YIpx/Xc5hxQRjHSvtH5/1yX33GgRQ+wZl56o81qBgiGZAfiDPd5mDYlQ==}"
           scope: GLOBAL
           username: "qihangliu"
           usernameSecret: true
       - usernamePassword:
-          description: "liu-gitee凭据"
+          description: "liu-gitee"
           id: "463e6b72-63de-4775-8ca4-01f465f4f33e"
           password: "{AQAAABAAAAAwbPc4vqAZvNKVegL2p8b1It+dsovydB00u5dMQTO3wwVMU3kPb3XR+bt5RlGynu2+T8PgRq92qBhw93K8ZFivdQ==}"
           scope: GLOBAL
@@ -170,69 +186,6 @@ unclassified:
       whiteB: "#FFFFFF"
       yellow: "#CDCD00"
       yellowB: "#FFFF00"
-    - black: "#000000"
-      blackB: "#555555"
-      blue: "#0000AA"
-      blueB: "#5555FF"
-      cyan: "#00AAAA"
-      cyanB: "#55FFFF"
-      defaultBackground: 0
-      defaultForeground: 7
-      green: "#00AA00"
-      greenB: "#55FF55"
-      magenta: "#AA00AA"
-      magentaB: "#FF55FF"
-      name: "vga"
-      red: "#AA0000"
-      redB: "#FF5555"
-      white: "#AAAAAA"
-      whiteB: "#FFFFFF"
-      yellow: "#AA5500"
-      yellowB: "#FFFF55"
-    - black: "black"
-      blackB: "black"
-      blue: "blue"
-      blueB: "blue"
-      cyan: "cyan"
-      cyanB: "cyan"
-      green: "green"
-      greenB: "green"
-      magenta: "magenta"
-      magentaB: "magenta"
-      name: "css"
-      red: "red"
-      redB: "red"
-      white: "white"
-      whiteB: "white"
-      yellow: "yellow"
-      yellowB: "yellow"
-    - black: "#2E3436"
-      blackB: "#2E3436"
-      blue: "#3465A4"
-      blueB: "#3465A4"
-      cyan: "#06989A"
-      cyanB: "#06989A"
-      defaultBackground: 0
-      defaultForeground: 7
-      green: "#4E9A06"
-      greenB: "#4E9A06"
-      magenta: "#75507B"
-      magentaB: "#75507B"
-      name: "gnome-terminal"
-      red: "#CC0000"
-      redB: "#CC0000"
-      white: "#D3D7CF"
-      whiteB: "#D3D7CF"
-      yellow: "#C4A000"
-      yellowB: "#C4A000"
-  bitbucketEndpointConfiguration:
-    endpoints:
-    - bitbucketCloudEndpoint:
-        enableCache: false
-        enableHookSignature: false
-        manageHooks: false
-        repositoriesCacheDuration: 0
-        teamCacheDuration: 0
   buildDiscarders:
     configuredBuildDiscarders:
     - "jobBuildDiscarder"
@@ -302,4 +255,3 @@ tool:
     triggerDownstreamUponResultNotBuilt: false
     triggerDownstreamUponResultSuccess: true
     triggerDownstreamUponResultUnstable: false
-
