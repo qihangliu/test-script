@@ -7,75 +7,43 @@ pipeline {
         }
     }
 
-    environment {
-        // 定义Maven settings.xml的本地路径
-        SETTINGS_XML = "${WORKSPACE}/custom-settings.xml"
-    }
-
     stages {
         // ====================================================================
-        // 阶段一：准备 Maven 配置
-        // ====================================================================
-        stage('Prepare Settings') {
-            steps {
-                script {
-                    def settingsXml = '''
-<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
-                              https://maven.apache.org/xsd/settings-1.0.0.xsd ">
-  <mirrors>
-    <mirror>
-      <id>aliyunmaven</id>
-      <mirrorOf>central</mirrorOf>
-      <name>Aliyun Maven</name>
-      <url>https://maven.aliyun.com/repository/public </url>
-    </mirror>
-    <mirror>
-      <id>maven-central</id>
-      <mirrorOf>central</mirrorOf>
-      <name>Maven Central</name>
-      <url>https://repo.maven.apache.org/maven2 </url>
-    </mirror>
-  </mirrors>
-</settings>
-'''
-                    writeFile file: SETTINGS_XML, text: settingsXml
-                }
-            }
-        }
-
-        // ====================================================================
-        // 阶段二：构建 lts（仅在有变更时）
+        // 阶段一：在子目录中构建 lts 依赖
         // ====================================================================
         stage('Build Dependency: lts') {
             steps {
-                dir('lts-workspace') {
-                    echo '检出 light-task-scheduler...'
+                dir('lts-dependency') {
+                    echo "INFO: 正在强制重置 lts-dependency 目录权限..."
+                    sh 'mkdir -p . && chmod -R u+w .'
+
+                    echo '进入 lts-dependency 目录，准备检出 light-task-scheduler...'
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: '*/master']],
                         userRemoteConfigs: [[
-                            url: 'https://gitee.com/changyunhuizhi/light-task-scheduler.git ',
+                            url: 'https://gitee.com/changyunhuizhi/light-task-scheduler.git',
                             credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
-                        ]]
+                        ]],
+                        extensions: [[$class: 'CleanBeforeCheckout']]
                     ])
 
-                    script {
-                        // 标记安全目录
-                        sh "git config --global --add safe.directory ${env.WORKSPACE}/lts-workspace"
+                    configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
+                        script {
+                            echo "INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)..."
+                            sh "git config --global --add safe.directory ${env.WORKSPACE}/lts-dependency"
 
-                        // 获取最新 commit hash
-                        def currentHash = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
-                        def hashFile = "${env.JENKINS_HOME}/lts-commit-hash.txt"
-                        def lastHash = fileExists(hashFile) ? readFile(hashFile).trim() : ""
+                            def currentHash = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+                            def hashFile = "${env.JENKINS_HOME}/lts-commit-hash.txt"
+                            def lastHash = fileExists(hashFile) ? readFile(hashFile).trim() : ""
 
-                        if (currentHash != lastHash) {
-                            echo "检测到 lts 有新提交，执行 mvn install..."
-                            sh "mvn -s ${SETTINGS_XML} clean install -DskipTests"
-                            writeFile file: hashFile, text: currentHash
-                        } else {
-                            echo "lts 代码无变化，跳过构建，直接使用缓存的 .m2 依赖"
+                            if (currentHash != lastHash) {
+                                echo "检测到 lts 有新提交，执行 mvn install..."
+                                sh "mvn -s ${MAVEN_SETTINGS} -T 8 clean install -DskipTests"
+                                writeFile file: hashFile, text: currentHash
+                            } else {
+                                echo "lts 代码无变化，跳过构建。"
+                            }
                         }
                     }
                 }
@@ -83,65 +51,89 @@ pipeline {
         }
 
         // ====================================================================
-        // 阶段三：构建主项目
+        // 阶段二：在子目录中构建主项目
         // ====================================================================
         stage('Build Main Project') {
             steps {
-                echo '检出 opwb-engines 主项目...'
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/workbench-2023']],
-                    userRemoteConfigs: [[
-                        url: 'https://gitee.com/changyunhuizhi/opwb-engines.git ',
-                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
-                    ]]
-                ])
+                dir('main-project') {
+                    echo "INFO: 正在强制重置 main-project 目录权限..."
+                    sh 'mkdir -p . && chmod -R u+w .'
 
-                sh "git config --global --add safe.directory ${env.WORKSPACE}"
+                    echo '进入 main-project 目录，准备检出 opwb-engines 主项目...'
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/workbench-2023']],
+                        userRemoteConfigs: [[
+                            url: 'https://gitee.com/changyunhuizhi/opwb-engines.git',
+                            credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                        ]],
+                        extensions: [[$class: 'CleanBeforeCheckout']]
+                    ])
 
-                echo '正在执行 Maven 构建...'
-                sh "mvn -s ${SETTINGS_XML} clean package -DskipTests -U"
+                    configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
+                        script {
+                            echo "INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)..."
+                            sh "git config --global --add safe.directory ${env.WORKSPACE}/main-project"
+
+                            echo '正在执行 Maven 构建...'
+                            sh "mvn -s ${MAVEN_SETTINGS} -T 8 clean package -DskipTests -U"
+                        }
+                    }
+                }
             }
         }
 
         // ====================================================================
-        // 阶段四：归档到共享目录
+        // 阶段三：归档到共享目录
         // ====================================================================
         stage('Archive to Share') {
             steps {
                 script {
                     def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
-                    def shareRoot = "${env.JENKINS_HOME}/share"
+                    def shareRoot = "/var/jenkins_home/share"
                     def targetDir = "${shareRoot}/${env.JOB_NAME}-${timestamp}"
+
+                    def excludePattern = '**/target/*-sources.jar,**/target/*-javadoc.jar'
+                    def trackerJar = findFiles(glob: 'main-project/devops-jobtracker/target/*.jar', excludes: excludePattern)
+                    def coreJar = findFiles(glob: 'main-project/devops-core/target/*-exec.jar')
+                    def taskJar = findFiles(glob: 'main-project/devops-tasktracker/target/*.jar', excludes: excludePattern)
+
+                    if (trackerJar.length == 0 || coreJar.length == 0 || taskJar.length == 0) {
+                        error "错误：一个或多个主构建产物 (*.jar) 未找到，无法归档！"
+                    }
 
                     sh """
                         set -e
+                        echo "INFO: 正在创建归档目录: ${targetDir}"
                         mkdir -p "${targetDir}/devops-jobtracker"
                         mkdir -p "${targetDir}/devops-core"
                         mkdir -p "${targetDir}/devops-tasktracker"
 
-                        git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
+                        echo "INFO: 正在归档 Git 日志 (从 main-project 目录)..."
+                        (cd main-project && git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s") > "${targetDir}/git_commit_log.txt"
 
-                        cp "${env.WORKSPACE}/devops-jobtracker/target/devops-jobtracker-1.0-SNAPSHOT.jar" "${targetDir}/devops-jobtracker/"
-                        cp "${env.WORKSPACE}/devops-core/target/devops-core-1.0-SNAPSHOT-exec.jar" "${targetDir}/devops-core/"
-                        cp "${env.WORKSPACE}/devops-tasktracker/target/devops-tasktracker-1.0-SNAPSHOT.jar" "${targetDir}/devops-tasktracker/"
+                        echo "INFO: 正在归档主程序包..."
+                        cp "${trackerJar[0].path}" "${targetDir}/devops-jobtracker/"
+                        cp "${coreJar[0].path}" "${targetDir}/devops-core/"
+                        cp "${taskJar[0].path}" "${targetDir}/devops-tasktracker/"
 
                         cat <<EOF
---------------------------------------------------------
-文件已成功归档
-Windows 可通过以下路径访问：
-\\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}-${timestamp}
---------------------------------------------------------
+
+========================================================================
+✅ 构建产物已成功归档!
+
+   任务名称: ${env.JOB_NAME}
+   时间戳:  ${timestamp}
+
+   Windows 可通过以下路径访问：
+   \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}-${timestamp}
+========================================================================
+
 EOF
                     """
                 }
             }
         }
     }
-
-    post {
-        always {
-            echo '构建已结束。'
-        }
-    }
 }
+
