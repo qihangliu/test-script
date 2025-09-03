@@ -3,9 +3,13 @@ pipeline {
     // 1. 定义 Agent
     agent any
 
-    // 2. 定义触发器
+    // 2. 定义环境变量
+    environment {
+        DOCKER_IMAGE = 'testenv:3.0-250825'
+    }
+
+    // 3. 定义触发器
     triggers {
-        // 使用 cron 表达式实现定时构建
         // H(40-50) 8 * * * 表示每天 8:40 至 8:50 之间，由 Jenkins 选择一个固定的随机分钟执行。
         cron('H(40-50) 8 * * *')
     }
@@ -45,9 +49,11 @@ pipeline {
         stage('Execute Push Task') {
             steps {
                 script {
-                    echo "INFO: 准备在 Docker 容器 (testenv:3.0-250825) 中执行 Python 推送脚本..."
+                    // 在日志中也使用变量，方便追踪
+                    echo "INFO: 准备在 Docker 容器 (${env.DOCKER_IMAGE}) 中执行 Python 推送脚本..."
                     try {
-                        docker.image('testenv:3.0-250825').inside("--volume ${WORKSPACE}:/app -w /app") {
+                        // 此处使用在 environment 中定义的 DOCKER_IMAGE 变量
+                        docker.image(DOCKER_IMAGE).inside("--volume ${WORKSPACE}:/app -w /app") {
                             // 关键: returnStatus: true 会让 sh 返回脚本的退出码
                             def statusCode = sh(script: 'python ./utils/monitor/unified_inspection_push.py', returnStatus: true)
 
@@ -68,4 +74,3 @@ pipeline {
         }
     }
 }
-
