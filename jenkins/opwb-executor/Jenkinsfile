@@ -1,0 +1,167 @@
+pipeline {
+    // 1. 定义构建环境
+    // - 使用官方标准镜像，便于维护
+    // - 使用命名数据卷 'maven-m2-cache' 持久化 .m2 仓库，加速后续构建
+    agent {
+        docker {
+            image 'maven:3-eclipse-temurin-21'
+            args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        }
+    }
+
+    stages {
+        // ====================================================================
+        //  阶段 1: 拉取代码
+        // ====================================================================
+        stage('Checkout') {
+            steps {
+                echo 'INFO: 开始从 Git 仓库拉取代码 (完整克隆)...'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/master']],
+                    userRemoteConfigs: [[
+                        url: 'https://gitee.com/changyunhuizhi/opwb-executor.git',
+                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                    ]]
+                ])
+                echo 'SUCCESS: 代码拉取完成。'
+            }
+        }
+
+        // ====================================================================
+        //  阶段 2: 构建与测试
+        // ====================================================================
+        stage('Build') {
+            steps {
+                configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
+                    script {
+                        echo 'INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)...'
+
+                        withEnv(['MAVEN_OPTS=-Xmx8g -Xms4g']) {
+                            echo "INFO: 使用优化参数 MAVEN_OPTS=${env.MAVEN_OPTS} 和 1 个线程进行构建..."
+                            sh 'mvn -s ${MAVEN_SETTINGS} clean install -DskipTests'
+                        }
+                        echo 'SUCCESS: Maven 构建完成。'
+                    }
+                }
+            }
+        }
+        
+        // ====================================================================
+        //  阶段 3: 归档构建产物 (在 Jenkins 页面上提供下载)
+        // ====================================================================
+        stage('Archive Artifacts') {
+            steps {
+                echo 'INFO: 正在归档构建产物...'
+                archiveArtifacts artifacts: 'target/script-executor-0.0.1-SNAPSHOT.jar', allowEmptyArchive: false
+                echo 'SUCCESS: 构建产物已归档。'
+            }
+        }
+
+        // ====================================================================
+        //  阶段 4: 部署到测试环境
+        // ====================================================================
+        stage('Deploy to Test') {
+            steps {
+                sshagent(credentials: ['ssh-key-for-test-server']) {
+                    script {
+                        echo "INFO: 开始查找构建产物..."
+                        def executorJar = findFiles(glob: 'target/script-executor-0.0.1-SNAPSHOT.jar')
+
+                        if (executorJar.size() == 0) {
+                            error "错误：构建产物 script-executor-0.0.1-SNAPSHOT.jar 未找到，无法部署！"
+                        }
+                        def jarFile = executorJar[0].path
+                        def jarFileName = executorJar[0].name
+
+                        def remoteUser = "root"
+                        def remoteHost = "10.189.189.189"
+                        def remoteAppDir = "/data/server/se"
+                        def remoteBackupDir = "/data/server/se_backup"
+
+                        echo "INFO: [1/2] 正在传输文件 ${jarFileName} 到服务器的 /tmp 目录..."
+                        sh "scp -o StrictHostKeyChecking=no ${jarFile} ${remoteUser}@${remoteHost}:/tmp/"
+                        echo "SUCCESS: 文件传输成功！"
+
+                        echo "INFO: [2/2] 准备在远程服务器上执行部署脚本..."
+
+                        sh """
+ssh -o StrictHostKeyChecking=no ${remoteUser}@${remoteHost} /bin/bash << 'END_SCRIPT'
+set -e
+
+# --- 1. 定义时间戳变量 ---
+TIMESTAMP=\$(date +"%y-%m-%d_%H-%M-%S")
+APP_DIR="${remoteAppDir}"
+BACKUP_DIR="${remoteBackupDir}"
+JAR_NAME="${jarFileName}"
+
+SOURCE_FILE="\${APP_DIR}/\${JAR_NAME}"
+TEMP_FILE="/tmp/\${JAR_NAME}"
+
+echo "===================== 远程部署开始 ====================="
+echo " 应用目录: \${APP_DIR}"
+echo " JAR文件名: \${JAR_NAME}"
+echo " 备份目录: \${BACKUP_DIR}"
+echo "--------------------------------------------------------"
+
+# --- 确保备份目录存在 ---
+mkdir -p "\${BACKUP_DIR}"
+
+
+if [ -f "\${SOURCE_FILE}" ] && cmp -s "\${SOURCE_FILE}" "\${TEMP_FILE}"; then
+    echo "✅ 文件内容一致，无需更新。将移除临时文件..."
+    rm -f "\${TEMP_FILE}"
+else
+    echo ">>> 检测到文件内容不一致或首次部署，开始执行更新流程..."
+
+    if [ -f "\${SOURCE_FILE}" ]; then
+        echo "[1/4] 正在备份当前应用文件: \${SOURCE_FILE}"
+        BACKUP_FILE="\${BACKUP_DIR}/\${JAR_NAME}.\${TIMESTAMP}"
+        echo "      备份到: \${BACKUP_FILE}"
+        cp "\${SOURCE_FILE}" "\${BACKUP_FILE}"
+    else
+        echo "[1/4] 远程目录中没有旧文件，跳过备份步骤。"
+    fi
+    
+    echo "[2/4] 正在清理旧备份，最多保留 10 个..."
+    if [ -d "\${BACKUP_DIR}" ]; then
+      ls -1t "\${BACKUP_DIR}" | grep "\${JAR_NAME}" | tail -n +11 | xargs -I {} rm -- "\${BACKUP_DIR}/{}"
+      echo "      旧备份清理完成。"
+    else
+      echo "      备份目录不存在，跳过清理。"
+    fi
+
+    echo "[3/4] 正在部署新版本文件..."
+    mv "\${TEMP_FILE}" "\${SOURCE_FILE}"
+    echo "      新文件已从 /tmp 移动到 \${SOURCE_FILE}"
+
+    echo "[4/4] 正在重启服务..."
+    RESTART_SCRIPT="\${APP_DIR}/se.sh"
+    if [ -x "\${RESTART_SCRIPT}" ]; then
+        cd "\${APP_DIR}" && ./se.sh restart
+        echo "      服务重启命令已发送。"
+    else
+        echo "❌ 严重错误: 重启脚本 \${RESTART_SCRIPT} 不存在或没有执行权限！"
+        exit 1
+    fi
+    echo "--------------------------------------------------------"
+    echo "✅ 更新部署成功！"
+fi
+
+echo "===================== 远程部署结束 ====================="
+
+END_SCRIPT
+"""
+                        echo "SUCCESS: 远程部署脚本执行完毕。"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '构建流程结束。'
+        }
+    }
+}
