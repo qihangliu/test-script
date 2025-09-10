@@ -10,7 +10,7 @@ pipeline {
             // - npm-cache: 用于缓存 npm 下载的包
             // - webpack-cache: 用于持久化 Webpack 内部缓存
             // - node-modules-cache: 用于持久化 node_modules 目录，实现极速增量安装
-            args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache -v node-modules-cache:/workspace/node_modules'
+            args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache -v node-modules-cache:/workspace/node_modules --entrypoint='
         }
     }
 
@@ -48,7 +48,7 @@ pipeline {
                     CURRENT_CHECKSUM=$(md5sum package-lock.json | awk '{ print $1 }')
                     SAVED_CHECKSUM_FILE="node_modules/.lock-checksum"
 
-                    if [ -f "$SAVED_CHECKSUM_FILE" ] && [ "$CURRENT_CHECKSUM" == "$(cat "$SAVED_CHECKSUM_FILE")" ]; then
+                    if [ -f "$SAVED_CHECKSUM_FILE" ] && [ "$CURRENT_CHECKSUM" = "$(cat "$SAVED_CHECKSUM_FILE")" ]; then
                         echo "--> 成功: package-lock.json 未发生变化，跳过依赖安装。"
                     else
                         echo "--> INFO: package-lock.json 已发生变化，正在执行增量 'npm install'。"
@@ -57,8 +57,6 @@ pipeline {
                         echo "$CURRENT_CHECKSUM" > "$SAVED_CHECKSUM_FILE"
                     fi
                 '''
-                echo 'INFO: 正在更新 browserslist 数据库...'
-                sh 'npx browserslist@latest --update-db'
             }
         }
 
@@ -70,7 +68,7 @@ pipeline {
                 echo 'INFO: 正在清理旧的构建产物...'
                 sh 'rm -rf dist'
                 sh 'rm -f dist.zip'
-                withEnv(['NODE_OPTIONS=--max-old-space-size=8192']) {
+                withEnv(['NODE_OPTIONS=--max-old-space-size=8192', 'BROWSERSLIST_IGNORE_OLD_DATA=true', 'BROWSERSLIST_UPDATE=false']) {
                     echo "INFO: 正在使用 NODE_OPTIONS=${env.NODE_OPTIONS} 进行编译..."
                     sh 'NODE_ENV=production npm run build -- --no-lint'
                 }
@@ -134,4 +132,3 @@ EOF
         }
     }
 }
-
