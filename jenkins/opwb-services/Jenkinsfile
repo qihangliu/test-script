@@ -1,11 +1,10 @@
-// Jenkinsfile
 pipeline {
-    // 1. 定义构建环境 (已优化)
+    // 1. 定义构建环境
     // - 使用官方标准镜像，便于维护
     // - 使用命名数据卷 'maven-m2-cache' 持久化 .m2 仓库，加速后续构建
     agent {
         docker {
-            image 'maven:3-eclipse-temurin-21'
+            image 'maven:3.9.11-eclipse-temurin-21'
             args '-u root:root -v maven-m2-cache:/root/.m2/repository'
         }
     }
@@ -31,18 +30,19 @@ pipeline {
         }
 
         // ====================================================================
-        //  阶段 2: 构建与测试
+        //  阶段 2: 构建
         // ====================================================================
         stage('Build') {
             steps {
+                // 优化: 使用 configFileProvider 插件从 Jenkins 全局配置中加载 Maven settings.xml
                 configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
                     script {
                         echo 'INFO: 成功加载 Jenkins 全局 Maven 配置文件 (ID: maven-aliyun-settings)...'
 
-                        // 优化: 设定 MAVEN_OPTS 增加构建内存，并使用 -T 8 开启 8 线程并行构建，提升速度
+                        // 设定 MAVEN_OPTS 增加构建内存，提升速度
                         withEnv(['MAVEN_OPTS=-Xmx8g -Xms4g']) {
-                            echo "INFO: 使用优化参数 MAVEN_OPTS=${env.MAVEN_OPTS} 和 8 个线程进行构建..."
-                            sh 'mvn -s ${MAVEN_SETTINGS} -T 8 clean install -DskipTests'
+                            echo "INFO: 使用优化参数 MAVEN_OPTS=${env.MAVEN_OPTS}进行构建..."
+                            sh  'mvn -s ${MAVEN_SETTINGS} -T 8 clean install -DskipTests -Dmaven.artifact.threads=8'
                         }
                         echo 'SUCCESS: Maven 构建完成。'
                     }
@@ -51,7 +51,28 @@ pipeline {
         }
 
         // ====================================================================
-        //  阶段 3: 归档到共享目录
+        //  阶段 3: 生成 Git 日志
+        // ====================================================================
+        stage('Generate Git Log') {
+            steps {
+                script {
+                    echo 'INFO: 正在生成最近7天的 Git 提交日志...'
+                    // 使用三重双引号 """ 来确保内部的 `$` 和 `%` 符号不会被 Groovy 错误解释
+                    sh """
+                        # 明确设置 LANG 环境变量为支持 UTF-8 的 locale
+                        export LANG=C.UTF-8
+                        # 为 git 命令设置 safe.directory，防止 Jenkins 报错
+                        git config --global --add safe.directory ${env.WORKSPACE}
+                        # 导出最近7天且不包含合并提交的日志
+                        git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > git_commit_log.txt
+                    """
+                    echo 'SUCCESS: Git 日志生成完成。'
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 4: 归档到共享目录
         // ====================================================================
         stage('Archive to Share') {
             steps {
@@ -74,13 +95,12 @@ pipeline {
                         mkdir -p "${targetDir}/opwb-web"
                         mkdir -p "${targetDir}/opwb-terminal"
 
-                        echo "INFO: [2/4] 正在生成最近7天的 Git 提交日志..."
-                        git config --global --add safe.directory ${env.WORKSPACE}
-                        git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
-
-                        echo "INFO: [3/4] 正在拷贝构建产物..."
+                        echo "INFO: [2/4] 正在拷贝构建产物..."
                         cp "${webJar[0].path}" "${targetDir}/opwb-web/"
                         cp "${terminalJar[0].path}" "${targetDir}/opwb-terminal/"
+
+                        echo "INFO: [3/4] 正在拷贝 Git 日志..."
+                        cp git_commit_log.txt "${targetDir}/"
 
                         echo "INFO: [4/4] 所有操作完成！"
 
@@ -89,8 +109,6 @@ pipeline {
 
 ========================================================================
 ✅ 构建产物已成功归档!
-
-   时间戳: ${timestamp}
 
    你可以通过以下网络路径从 Windows 访问：
    \\\\\\\\10.189.189.245\\\\share\\\\opwb-service-${timestamp}
@@ -103,6 +121,19 @@ EOF
                 }
             }
         }
+
+        // ====================================================================
+        //  阶段 5: 使用 Jenkins 原生功能归档 (新增)
+        // ====================================================================
+        stage('Archive Jenkins Artifacts') {
+            steps {
+                echo 'INFO: 开始归档构建产物至 Jenkins...'
+                // 使用逗号分隔符指定多个文件模式
+                archiveArtifacts artifacts: 'opwb-web/target/*.jar, opwb-terminal/target/*.jar, git_commit_log.txt', fingerprint: true, allowEmptyArchive: false
+                echo 'SUCCESS: Jenkins 归档完成。'
+            }
+        }
+
     }
 
     post {
