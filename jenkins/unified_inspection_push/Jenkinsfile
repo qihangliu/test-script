@@ -5,7 +5,11 @@ pipeline {
 
     // 2. 定义环境变量
     environment {
-        DOCKER_IMAGE = 'testenv:3.0-250825'
+        DOCKER_IMAGE = 'testenv:baseline'
+        // 定义脚本路径，方便维护
+        SCRIPT_PATH = './utils/monitor/unified_inspection_push.py'
+        // 定义日志归档路径
+        LOG_ARTIFACT_PATH = 'output/log/abnormal_tasks_summary_*.txt'
     }
 
     // 3. 定义触发器
@@ -14,9 +18,10 @@ pipeline {
         cron('H(40-50) 8 * * *')
     }
 
+    // 4. 定义全局选项
     options {
         // 启用 AnsiColor 插件的开关，解析并渲染流水线中的 ANSI 颜色代码
-        ansiColor('xterm256')
+        ansiColor('xterm')
     }
 
     stages {
@@ -49,33 +54,73 @@ pipeline {
         }
 
         // ====================================================================
-        //  阶段 3: 执行推送任务
+        //  阶段 3: 执行巡检与推送
         // ====================================================================
-        stage('Execute Push Task') {
+        stage('Execute Inspection & Push') {
             steps {
                 script {
-                    // 在日志中也使用变量，方便追踪
-                    echo "INFO: 准备在 Docker 容器 (${env.DOCKER_IMAGE}) 中执行 Python 推送脚本..."
+                    echo "INFO: 准备在 Docker 容器 (${env.DOCKER_IMAGE}) 中执行 Python 巡检脚本..."
                     try {
-                        // 此处使用在 environment 中定义的 DOCKER_IMAGE 变量
                         docker.image(DOCKER_IMAGE).inside("--volume ${WORKSPACE}:/app -w /app") {
                             // 关键: returnStatus: true 会让 sh 返回脚本的退出码
-                            def statusCode = sh(script: 'python ./utils/monitor/unified_inspection_push.py', returnStatus: true)
+                            def statusCode = sh(script: "python ${env.SCRIPT_PATH} --no-push", returnStatus: true)
 
-                            // 只判断是否成功 (退出码为0)
+                            // 判断脚本退出码
                             if (statusCode == 0) {
-                                echo "SUCCESS: 脚本执行成功，推送已完成。"
+                                echo "SUCCESS: 巡检脚本执行成功，所有任务已处理。"
                             } else {
-                                // 任何非0的退出码都表示推送失败或环境问题
-                                error("ERROR: 推送脚本执行失败，退出码为 ${statusCode}。")
+                                // 任何非0的退出码都表示环境问题或推送失败
+                                // 将构建标记为 FAILURE，这样会触发 post { failure }
+                                error("ERROR: 巡检脚本执行失败，退出码为 ${statusCode}。请检查下方日志和归档文件获取详细信息。")
                             }
                         }
                     } catch (any) {
                         // 捕获 Docker 或 sh 命令本身的执行错误
-                        error("FATAL: Jenkins 步骤执行时发生致命错误: ${any.message}")
+                        error("FATAL: Jenkins 步骤在执行 Docker 命令时发生致命错误: ${any.message}")
                     }
                 }
             }
+        }
+    }
+
+    // ====================================================================
+    //  构建后操作 (Post Actions)
+    // ====================================================================
+    post {
+        // 'always' 块中的操作无论构建成功、失败或不稳定都会执行
+        always {
+            script {
+                echo "INFO: [Post Action] 开始执行构建后操作..."
+                
+                // 步骤 1: 归档异常日志
+                echo "INFO: [Post Action] 正在检查并归档异常任务概要日志..."
+                // 使用 findFiles 检查文件是否存在，避免在没有文件时 archiveArtifacts 报错
+                def foundFiles = findFiles(glob: "${env.LOG_ARTIFACT_PATH}")
+                if (foundFiles.length > 0) {
+                    archiveArtifacts(
+                        artifacts: "${env.LOG_ARTIFACT_PATH}",
+                        allowEmptyArchive: false // 因为我们已经检查过文件存在
+                    )
+                    echo "SUCCESS: [Post Action] 异常任务概要日志已成功归档。"
+                } else {
+                    echo "INFO: [Post Action] 未发现可归档的异常任务概要日志文件。"
+                }
+
+                // 步骤 2: 清理工作区
+                // 注意：如果需要在构建失败后检查工作区，可以把 cleanWs 移到 success 块中
+                echo "INFO: [Post Action] 清理工作区以节省空间..."
+                cleanWs()
+                echo "SUCCESS: [Post Action] 构建后工作区清理完成。"
+            }
+        }
+        success {
+            echo "SUCCESS: 流水线成功完成所有阶段。"
+        }
+        failure {
+            echo "FAILURE: 流水线在一个或多个阶段失败。"
+        }
+        aborted {
+            echo "ABORTED: 流水线被用户中止。"
         }
     }
 }
