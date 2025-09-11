@@ -11,17 +11,17 @@ pipeline {
             // - npm-cache: 用于持久化 npm 下载的包文件（tarballs），避免重复从网络下载
             // - webpack-cache: 用于持久化 Webpack 内部的文件系统缓存，能加速二次构建的编译过程
             // - node-modules-cache: 用于持久化整个 node_modules 目录，这是实现下面“极速增量安装”策略的核心基础
-            args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache -v node-modules-cache:/workspace/node_modules'
+            args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache -v node-modules-cache:/workspace/node_modules --entrypoint='
         }
     }
 
-    stages {
+     stages {
         // ====================================================================
         // 阶段：检出代码
         // ====================================================================
         stage('Checkout') {
             steps {
-                echo 'INFO: 正在检出代码 (启用浅克隆)...'
+                echo 'INFO: 正在检出代码 (使用完整克隆)...'
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: '*/shijiaxuan-pool']], // 指定要检出的 Git 分支
@@ -29,10 +29,7 @@ pipeline {
                         url: 'https://gitee.com/changyunhuizhi/opwb-web.git', // Git 仓库地址
                         credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e' // Jenkins 中存储的凭证 ID
                     ]],
-                    // 启用浅克隆（shallow clone），只拉取最近一次的提交记录（depth: 1）
-                    extensions: [
-                        [$class: 'CloneOption', shallow: true, depth: 1, timeout: 60]
-                    ]
+                    extensions: []
                 ])
             }
         }
@@ -58,7 +55,7 @@ pipeline {
                     SAVED_CHECKSUM_FILE="node_modules/.lock-checksum"
 
                     # 3. 判断：如果 checksum 文件存在，并且其内容与当前计算出的哈希值完全相同
-                    if [ -f "$SAVED_CHECKSUM_FILE" ] && [ "$CURRENT_CHECKSUM" == "$(cat "$SAVED_CHECKSUM_FILE")" ]; then
+                    if [ -f "$SAVED_CHECKSUM_FILE" ] && [ "$CURRENT_CHECKSUM" = "$(cat "$SAVED_CHECKSUM_FILE")" ]; then
                         # 如果哈希值未变，说明依赖包没有任何变化，直接跳过整个安装过程，将此阶段耗时从数分钟降至数秒
                         echo "--> 成功: package-lock.json 未发生变化，跳过依赖安装。"
                     else
@@ -71,9 +68,6 @@ pipeline {
                         echo "$CURRENT_CHECKSUM" > "$SAVED_CHECKSUM_FILE"
                     fi
                 '''
-                echo 'INFO: 正在更新 browserslist 数据库...'
-                // 这个命令会更新 caniuse-lite 数据库，让后续 build 过程不再打印关于浏览器支持的警告
-                sh 'npx browserslist@latest --update-db'
             }
         }
 
@@ -88,8 +82,8 @@ pipeline {
                 sh 'rm -f dist.zip'
 
                 // 使用 withEnv 块来临时设置环境变量
-                // 根据服务器的物理内存配置，将 Node.js 的堆内存上限提升至 20GB
-                withEnv(['NODE_OPTIONS=--max-old-space-size=20480']) {
+                // 同时添加环境变量，禁用 browserslist 的更新和警告
+                withEnv(['NODE_OPTIONS=--max-old-space-size=8192', 'BROWSERSLIST_IGNORE_OLD_DATA=true', 'BROWSERSLIST_UPDATE=false']) {
                     echo "INFO: 使用 NODE_OPTIONS=${env.NODE_OPTIONS} 编译项目..."
                     // 核心构建命令
                     // - NODE_ENV=production: 触发所有生产环境优化（代码压缩、tree-shaking等）
@@ -190,4 +184,3 @@ pipeline {
         }
     }
 }
-
