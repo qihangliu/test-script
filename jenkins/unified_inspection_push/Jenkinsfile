@@ -63,7 +63,7 @@ pipeline {
                     try {
                         docker.image(DOCKER_IMAGE).inside("--volume ${WORKSPACE}:/app -w /app") {
                             // 关键: returnStatus: true 会让 sh 返回脚本的退出码
-                            def statusCode = sh(script: "python ${env.SCRIPT_PATH} --no-push", returnStatus: true)
+                            def statusCode = sh(script: "python ${env.SCRIPT_PATH}", returnStatus: true)
 
                             // 判断脚本退出码
                             if (statusCode == 0) {
