@@ -140,5 +140,39 @@ EOF
                 }
             }
         }
+
+        // ====================================================================
+        // 阶段四：在 Jenkins 上归档构建产物
+        // ====================================================================
+        stage('Archive on Jenkins') {
+            steps {
+                script {
+                    echo 'INFO: 正在 Jenkins 上归档构建产物...'
+
+                    def artifactsToArchive = [
+                        'main-project/devops-core/target/*-exec.jar',
+                        'main-project/devops-jobtracker/target/*.jar',
+                        'main-project/devops-tasktracker/target/*.jar'
+                    ]
+
+                    // 检查是否有新的 Git 提交，如果有，则生成并归档日志
+                    def logOutput = sh(script: '(cd main-project && git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s")', returnStdout: true).trim()
+                    if (logOutput) {
+                        echo 'INFO: 发现新的 Git 提交，将归档日志文件...'
+                        writeFile(file: 'git_commit_log.txt', text: logOutput)
+                        artifactsToArchive.add('git_commit_log.txt')
+                    } else {
+                        echo 'INFO: 最近7天内无新的 Git 提交，跳过归档日志。'
+                    }
+
+                    // 归档所有产物
+                    archiveArtifacts(
+                        artifacts: artifactsToArchive.join(', '),
+                        excludes: '**/target/*-sources.jar, **/target/*-javadoc.jar',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
     }
 }
