@@ -1,12 +1,27 @@
-// Jenkinsfile
+// Jenkinsfile - 自动化镜像构建与测试流水线
+def DYNAMIC_IMAGE_TAG // 定义一个脚本级变量来持有动态标签
+
 pipeline {
     // 1. 定义 Agent
     agent any
 
-    // 2. 新增：定义定时触发器
+    // 2. 定义环境变量
+    environment {
+        // 定义基础镜像名称
+        IMAGE_NAME = 'testenv'
+        // 定义默认的稳定镜像版本，当Dockerfile未更新时使用
+        STABLE_IMAGE_TAG = 'baseline'
+    }
+
+    // 定义流水线选项
+    options {
+        // 启用 AnsiColor 插件的开关，解析并渲染流水线中的 ANSI 颜色代码
+        ansiColor('xterm')
+    }
+
+    // 3. 定义触发器
     triggers {
-        // H(10-20) 4 * * * 表示每天凌晨 4:10 至 4:20 之间，
-        // 由 Jenkins 选择一个固定的随机分钟执行，以实现负载分散。
+        // 每天凌晨 4:10-4:20 定时执行
         cron('H(10-20) 4 * * *')
     }
 
@@ -18,7 +33,7 @@ pipeline {
             steps {
                 echo "INFO: 准备为构建 #${env.BUILD_NUMBER} 清理工作区..."
                 cleanWs()
-                echo "SUCCESS: 工作区清理完成。"
+                echo "SUCCESS: 工作区清理完成."
             }
         }
 
@@ -28,52 +43,148 @@ pipeline {
         stage('Checkout SCM') {
             steps {
                 script {
-                    echo "INFO: 开始从 Gitee 仓库检出代码 (main 分支)..."
+                    // 定义Git仓库和分支的变量
+                    def gitUrl = 'https://gitee.com/changyunhuizhi/opwb-automation.git'
+                    def gitBranch = 'main'
+
+                    // 使用变量生成动态的日志消息
+                    echo "INFO: 开始从 Gitee 仓库 [${gitUrl}] 检出代码 (分支: ${gitBranch})..."
+
                     retry(count: 3) {
-                        git branch: 'main',
+                        // 在 git 步骤中使用变量
+                        git branch: gitBranch,
                             credentialsId: '463e6b72-63de-4775-8ca4-01f465f4f33e',
-                            url: 'https://gitee.com/changyunhuizhi/opwb-automation.git'
+                            url: gitUrl
                     }
-                    echo "SUCCESS: 代码检出成功。"
+                    echo "SUCCESS: 代码检出成功."
                 }
             }
         }
 
         // ====================================================================
-        //  阶段 3: 运行 API 自动化测试
+        //  阶段 3: 定义构建变量 (包括动态镜像标签)
+        // ====================================================================
+        stage('Define Build Vars') {
+            steps {
+                script {
+                    // 生成 YYYYMMDD 格式的日期字符串
+                    def buildDate = new Date().format('yyyyMMdd')
+                    // 赋值给脚本级变量
+                    DYNAMIC_IMAGE_TAG = "${buildDate}-${env.BUILD_NUMBER}"
+                    echo "INFO: 本次构建生成的动态镜像标签为: ${env.IMAGE_NAME}:${DYNAMIC_IMAGE_TAG}"
+
+                    // 使用更可靠的方式检查文件变动
+                    echo "INFO: 检查自上次成功构建以来的文件变动..."
+                    def changedFiles = ''
+                    // GIT_PREVIOUS_SUCCESSFUL_COMMIT 变量在第一次成功构建后才存在
+                    if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
+                        echo "INFO: 对比当前 commit (${env.GIT_COMMIT}) 与上次成功 commit (${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT})..."
+                        changedFiles = sh(returnStdout: true, script: "git diff --name-only ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT} ${env.GIT_COMMIT}").trim()
+                    } else {
+                        // 如果是第一次构建，我们默认需要构建镜像
+                        echo "WARNING: 未找到上次成功构建的 commit ID，将默认认为 Dockerfile 已变动。"
+                        changedFiles = 'Dockerfile' // 强制包含 Dockerfile
+                    }
+
+                    echo "INFO: 本次构建涉及的变动文件:\n${changedFiles}"
+                    env.DOCKERFILE_CHANGED = changedFiles.contains('Dockerfile') ? 'true' : 'false'
+                    echo "INFO: Dockerfile 是否发生变动: ${env.DOCKERFILE_CHANGED}"
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 4: 构建 Docker 镜像 (仅在 Dockerfile 变动时)
+        // ====================================================================
+        stage('Build Docker Image') {
+            when {
+                // 当 DOCKERFILE_CHANGED 环境变量为 'true' 时，才执行此阶段
+                expression { env.DOCKERFILE_CHANGED == 'true' }
+            }
+            steps {
+                script {
+                    // 使用脚本级变量
+                    def newImageFullName = "${env.IMAGE_NAME}:${DYNAMIC_IMAGE_TAG}"
+                    echo "INFO: 检测到 Dockerfile 变动，开始构建新镜像: ${newImageFullName}..."
+                    // 使用 docker build 命令构建镜像
+                    docker.build(newImageFullName, '.')
+                    echo "SUCCESS: 新镜像 ${newImageFullName} 构建成功."
+                }
+            }
+            // 构建成功后执行清理
+            post {
+                success {
+                    script {
+                        echo "INFO: 清理无用的悬空 Docker 镜像..."
+                        sh 'docker image prune -f'
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 5: 运行 API 自动化测试 (动态选择镜像)
         // ====================================================================
         stage('Run API Tests') {
             steps {
-                echo "INFO: 准备在 Docker 容器 (testenv:3.0-250825) 中执行自动化测试..."
-                // 启动容器来运行脚本
-                docker.image('testenv:3.0-250825').inside("--volume ${WORKSPACE}:/app --volume ${WORKSPACE}/report:/app/report -w /app") {
-                    // 除服务器巡检
-                    sh 'python run_main_test.py --clean --type read_yaml login host_os network backup'
-                    // sh 'python run_main_test.py --clean --type read_yaml login network backup --report'
-                    // 仅测试登录和检查配置文件
-                    // sh 'python run_main_test.py --clean --type login read_yaml'
-                    // 仅测试主机服务器巡检任务
-                    // sh 'python run_main_test.py --clean --type host_os'
-                    // 所有任务
-                    // sh 'python run_main_test.py --clean'
+                script {
+                    def imageToUse
+                    // 如果 Dockerfile 变动了，就使用本次构建的新镜像
+                    if (env.DOCKERFILE_CHANGED == 'true') {
+                        // 使用脚本级变量
+                        imageToUse = "${env.IMAGE_NAME}:${DYNAMIC_IMAGE_TAG}"
+                        echo "INFO: 使用新构建的镜像 [${imageToUse}] 运行测试."
+                    } else {
+                        // 否则，使用稳定版的镜像
+                        imageToUse = "${env.IMAGE_NAME}:${env.STABLE_IMAGE_TAG}"
+                        echo "INFO: Dockerfile 未变动，使用稳定版镜像 [${imageToUse}] 运行测试."
+                    }
+
+                    // 启动选择好的容器来运行脚本
+                    docker.image(imageToUse).inside("--volume ${WORKSPACE}:/app --volume ${WORKSPACE}/report:/app/report -w /app") {
+                        sh 'python run_main_test.py --clean --type config login'
+                    }
+                    echo "SUCCESS: 自动化测试执行完成."
                 }
-                echo "SUCCESS: 自动化测试执行完成。"
             }
         }
     }
 
     // ====================================================================
-    //  构建后操作
+    //  构建后操作 (优化后)
     // ====================================================================
     post {
         always {
-            echo "INFO: 开始执行构建后操作..."
-            // 归档 log 文件夹中的所有文件，排除 .gitkeep
-            archiveArtifacts artifacts: 'output/log/*', excludes: 'output/log/.gitkeep', allowEmptyArchive: true
+            script {
+                echo "INFO: 开始执行构建后操作..."
 
-            // 生成并展示 Allure 测试报告
-            allure includeProperties: false, jdk: '', report: 'output/report/allure-report', results: [[path: 'output/report/allure-results']]
-            echo "SUCCESS: 构建后操作完成。"
+                // 1. 首先，无论成功与否都尝试生成 Allure 报告
+                // 这样即使测试失败，也能看到失败的报告
+                try {
+                    allure commandline: 'Allure', includeProperties: false, jdk: '', report: 'output/report/allure-report', results: [[path: 'output/report/allure-results']]
+                } catch (e) {
+                    echo "WARNING: Allure 报告生成失败: ${e.message}"
+                }
+
+                // 2. 然后，将原始结果目录压缩以便归档
+                def reportDir = 'output/report'
+                if (fileExists("${reportDir}/allure-results")) {
+                    echo "INFO: 正在将 Allure 原始结果压缩..."
+                    // 使用构建号命名，避免重名
+                    def zipFileName = "${reportDir}/allure-results-${env.BUILD_NUMBER}.zip"
+                    zip zipFile: zipFileName, dir: "${reportDir}/allure-results", overwrite: true
+
+                    // 3. 最后，归档日志和压缩后的结果文件
+                    echo "INFO: 归档日志文件和 Allure 结果压缩包..."
+                    archiveArtifacts artifacts: "output/log/*, ${zipFileName}", excludes: 'output/log/.gitkeep', allowEmptyArchive: true
+                } else {
+                    echo "WARNING: 未找到 allure-results 目录，跳过归档。"
+                    // 即使没有 allure-results，也尝试归档日志
+                    archiveArtifacts artifacts: 'output/log/*', excludes: 'output/log/.gitkeep', allowEmptyArchive: true
+                }
+
+                echo "SUCCESS: 构建后操作完成."
+            }
         }
     }
 }
