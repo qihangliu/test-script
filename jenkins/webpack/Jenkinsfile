@@ -1,4 +1,3 @@
-// Jenkinsfile
 pipeline {
     // ====================================================================
     // 1. 定义构建环境
@@ -6,11 +5,10 @@ pipeline {
     agent {
         docker {
             image 'node:14.15.0'
-            // 关键：挂载三个命名卷，最大化利用缓存
+            // 关键：挂载两个命名卷，避免冲突
             // - npm-cache: 用于缓存 npm 下载的包
-            // - webpack-cache: 用于持久化 Webpack 内部缓存
-            // - node-modules-cache: 用于持久化 node_modules 目录，实现极速增量安装
-            args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache -v node-modules-cache:/workspace/node_modules --entrypoint='
+            // - node-modules-cache: 用于持久化 node_modules 目录（包含 .cache），实现极速增量安装 + 编译缓存
+            args '-u root:root -v npm-cache:/root/.npm -v node-modules-cache:/workspace/node_modules --entrypoint='
         }
     }
 
@@ -68,6 +66,39 @@ pipeline {
                 echo 'INFO: 正在清理旧的构建产物...'
                 sh 'rm -rf dist'
                 sh 'rm -f dist.zip'
+
+                // --- 注入多线程配置 ---
+                script {
+                    def originalConfig = readFile('vue.config.js')
+                    def injectedCode = """
+                    // START: Injected multi-threading config
+                    const os = require('os');
+                    const isProd = process.env.NODE_ENV === 'production';
+                    if (isProd) {
+                        console.log('正在为 Babel-loader 注入多线程配置...');
+                        config.module
+                            .rule('js')
+                            .use('cache-loader')
+                            .loader('cache-loader')
+                            .end()
+                            .use('thread-loader')
+                            .loader('thread-loader')
+                            .options({
+                                workers: os.cpus().length - 1,
+                                poolTimeout: 2000
+                            })
+                            .before('babel-loader');
+                    }
+                    // END: Injected multi-threading config
+                    """
+                    def modifiedConfig = originalConfig.replaceFirst(
+                        'chainWebpack: config => \\{',
+                        "chainWebpack: config => {\n${injectedCode}"
+                    )
+                    writeFile(file: 'vue.config.js', text: modifiedConfig)
+                    echo "INFO: 已在内存中修改并写回 vue.config.js。"
+                }
+
                 withEnv(['NODE_OPTIONS=--max-old-space-size=8192', 'BROWSERSLIST_IGNORE_OLD_DATA=true', 'BROWSERSLIST_UPDATE=false']) {
                     echo "INFO: 正在使用 NODE_OPTIONS=${env.NODE_OPTIONS} 进行编译..."
                     sh 'NODE_ENV=production npm run build -- --no-lint'
