@@ -64,8 +64,7 @@ pipeline {
         stage('Build') {
             steps {
                 echo 'INFO: 正在清理旧的构建产物...'
-                sh 'rm -rf dist'
-                sh 'rm -f dist.zip'
+                sh 'rm -f dist.zip || true'
 
                 // --- 注入多线程配置 ---
                 script {
