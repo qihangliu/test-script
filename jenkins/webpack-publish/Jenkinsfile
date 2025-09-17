@@ -1,17 +1,16 @@
-// Jenkinsfile
 pipeline {
     // ====================================================================
     // 1. 定义构建环境
     // ====================================================================
     agent {
         docker {
-            // 指定用于构建的 Docker 镜像，这里是 Node.js 14.15.0 版本
+            // 指定用于构建的 Docker 镜像
             image 'node:14.15.0'
-            // 关键：挂载三个命名卷（named volumes），以最大化利用缓存，这是 Docker 推荐的最佳实践
-            // - npm-cache: 用于持久化 npm 下载的包文件（tarballs），避免重复从网络下载
-            // - webpack-cache: 用于持久化 Webpack 内部的文件系统缓存，能加速二次构建的编译过程
-            // - node-modules-cache: 用于持久化整个 node_modules 目录，这是实现下面“极速增量安装”策略的核心基础
-            args '-u root:root -v npm-cache:/root/.npm -v webpack-cache:/workspace/node_modules/.cache -v node-modules-cache:/workspace/node_modules --entrypoint='
+            // 关键：挂载两个命名卷（named volumes），避免冲突并最大化利用缓存
+            // - npm-cache: 用于缓存 npm 下载的包文件（tarballs），避免重复从网络下载
+            // - node-modules-cache: 用于持久化整个 node_modules 目录，这是实现下面“极速增量安装”策略的核心基础。
+            //   Webpack 的 .cache 目录是 node_modules 的子目录，因此会自动被这个卷持久化。
+            args '-u root:root -v npm-cache:/root/.npm -v node-modules-cache:/workspace/node_modules --entrypoint='
         }
     }
 
@@ -77,9 +76,40 @@ pipeline {
         stage('Build') {
             steps {
                 echo 'INFO: 正在清理旧的构建产物...'
-                // 确保每次构建都在一个干净的输出目录中进行，防止旧文件残留导致的问题
-                sh 'rm -rf dist'
-                sh 'rm -f dist.zip'
+                // 只清理最终打包的 zip 文件，Vue CLI 的 build 命令会自动清理 dist 目录
+                sh 'rm -f dist.zip || true'
+
+                // --- 注入多线程配置 ---
+                script {
+                    def originalConfig = readFile('vue.config.js')
+                    def injectedCode = """
+                    // START: Injected multi-threading config
+                    const os = require('os');
+                    const isProd = process.env.NODE_ENV === 'production';
+                    if (isProd) {
+                        console.log('正在为 Babel-loader 注入多线程配置...');
+                        config.module
+                            .rule('js')
+                            .use('cache-loader')
+                            .loader('cache-loader')
+                            .end()
+                            .use('thread-loader')
+                            .loader('thread-loader')
+                            .options({
+                                workers: os.cpus().length - 1,
+                                poolTimeout: 2000
+                            })
+                            .before('babel-loader');
+                    }
+                    // END: Injected multi-threading config
+                    """
+                    def modifiedConfig = originalConfig.replaceFirst(
+                        'chainWebpack: config => \\{',
+                        "chainWebpack: config => {\n${injectedCode}"
+                    )
+                    writeFile(file: 'vue.config.js', text: modifiedConfig)
+                    echo "INFO: 已在内存中修改并写回 vue.config.js。"
+                }
 
                 // 使用 withEnv 块来临时设置环境变量
                 // 同时添加环境变量，禁用 browserslist 的更新和警告
@@ -99,7 +129,8 @@ pipeline {
         // ====================================================================
         stage('Package Artifact') {
             steps {
-                // 进入编译生成的 dist 目录
+                echo 'INFO: 正在将 dist 目录打包为 dist.zip...'
+                // 进入编译生成的 dist 目录，确保 zip 包解压后直接是项目文件
                 dir('dist') {
                     // 将 dist 目录下的所有内容打包成 dist.zip，并存放到上层目录
                     // 关键修复：先进入 dist 目录再打包，可以确保 zip 包解压后直接是项目文件，而不是包含一个顶层的 dist 目录
