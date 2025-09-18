@@ -66,41 +66,45 @@ pipeline {
                 echo 'INFO: 正在清理旧的构建产物...'
                 sh 'rm -f dist.zip || true'
 
-                // --- 注入多线程配置 ---
+                // --- 注入多线程配置并禁用 Lint ---
                 script {
                     def originalConfig = readFile('vue.config.js')
                     def injectedCode = """
-                    // START: Injected multi-threading config
-                    const os = require('os');
-                    const isProd = process.env.NODE_ENV === 'production';
-                    if (isProd) {
-                        console.log('正在为 Babel-loader 注入多线程配置...');
-                        config.module
-                            .rule('js')
-                            .use('cache-loader')
-                            .loader('cache-loader')
-                            .end()
-                            .use('thread-loader')
-                            .loader('thread-loader')
-                            .options({
-                                workers: os.cpus().length - 1,
-                                poolTimeout: 2000
-                            })
-                            .before('babel-loader');
-                    }
-                    // END: Injected multi-threading config
-                    """
+// START: Injected multi-threading config and Lint disable
+const os = require('os');
+const isProd = process.env.NODE_ENV === 'production';
+if (isProd) {
+    console.log('正在为 Babel-loader 注入多线程配置...');
+    config.module
+        .rule('js')
+        .use('cache-loader')
+        .loader('cache-loader')
+        .end()
+        .use('thread-loader')
+        .loader('thread-loader')
+        .options({
+            workers: os.cpus().length - 1,
+            poolTimeout: 2000
+        })
+        .before('babel-loader');
+}
+// END: Injected multi-threading config and Lint disable
+"""
                     def modifiedConfig = originalConfig.replaceFirst(
-                        'chainWebpack: config => \\{',
+                        java.util.regex.Pattern.quote('chainWebpack: config => {'),
                         "chainWebpack: config => {\n${injectedCode}"
                     )
+                    // 关键修改：将 lintOnSave: undefined, 替换为 lintOnSave: false,
+                    modifiedConfig = modifiedConfig.replace('lintOnSave: undefined,', 'lintOnSave: false,')
+
                     writeFile(file: 'vue.config.js', text: modifiedConfig)
-                    echo "INFO: 已在内存中修改并写回 vue.config.js。"
+                    echo "INFO: 已在内存中修改并写回 vue.config.js，并已禁用 Lint。"
                 }
 
                 withEnv(['NODE_OPTIONS=--max-old-space-size=8192', 'BROWSERSLIST_IGNORE_OLD_DATA=true', 'BROWSERSLIST_UPDATE=false']) {
                     echo "INFO: 正在使用 NODE_OPTIONS=${env.NODE_OPTIONS} 进行编译..."
-                    sh 'NODE_ENV=production npm run build -- --no-lint'
+                    // 移除 --no-lint 参数，因为我们已通过修改配置文件来禁用它
+                    sh 'NODE_ENV=production npm run build'
                 }
             }
         }
