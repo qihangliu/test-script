@@ -182,20 +182,24 @@ if (isProd) {
                                 ls -1t html_backup_*.tar.gz 2>/dev/null | tail -n +\$((\$MAX_BACKUPS + 1)) | xargs -r rm -f
 
                                 echo "--> 正在清空目标目录..."
-                                # 彻底清空当前的应用目录，为新版本做准备
+                                # 安全地清空目标目录的所有内容，但不删除目录本身
+                                # 使用 '/*` 确保只删除内容，而不会误删 'html' 目录
+                                # 这里的 '?' 语法是防止变量为空导致危险的 'rm -rf /*'
                                 rm -rf "\${HTML_DIR:?}"/*
 
                                 echo "--> 正在解压新版本..."
                                 # 将 dist.zip 解压到工作目录，会产生一个名为 'dist' 的子目录
                                 unzip -q -o "\$DIST_ZIP" -d "\$WORK_DIR"
 
-                                echo "--> 正在将解压后的 'dist' 目录重命名为 'html'..."
-                                # 修正：将 'dist' 目录重命名为 'html' 并覆盖旧目录
-                                mv "\$WORK_DIR"/dist "\$HTML_DIR"
+                                echo "--> 正在将解压后的 'dist' 目录内容移动到部署目标路径..."
+                                # 修正：将 'dist' 目录中的所有内容移动到 'html' 目录
+                                # 这里的 `mv "$WORK_DIR"/dist/*` 确保移动的是内容
+                                mv "\$WORK_DIR"/dist/* "\$HTML_DIR"/
 
                                 echo "--> 正在清理临时文件..."
-                                # 删除上传的 zip 包
+                                # 删除上传的 zip 包和解压后留下的空 dist 目录
                                 rm "\$DIST_ZIP"
+                                rmdir "\$WORK_DIR"/dist || true
 
                                 echo "✅ 部署完成。"
                             '
