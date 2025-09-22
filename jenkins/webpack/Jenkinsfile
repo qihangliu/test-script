@@ -115,9 +115,8 @@ if (isProd) {
         stage('Package Artifact') {
             steps {
                 echo 'INFO: 正在将 dist 目录打包为 dist.zip...'
-                dir('dist') {
-                    sh 'zip -qr ../dist.zip .'
-                }
+                // 修正：在项目根目录执行 zip 命令，确保 dist 目录被包含在压缩包中
+                sh 'zip -qr dist.zip dist'
                 archiveArtifacts artifacts: 'dist.zip', followSymlinks: false
             }
         }
