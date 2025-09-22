@@ -131,12 +131,8 @@ if (isProd) {
         stage('Package Artifact') {
             steps {
                 echo 'INFO: 正在将 dist 目录打包为 dist.zip...'
-                // 进入编译生成的 dist 目录，确保 zip 包解压后直接是项目文件
-                dir('dist') {
-                    // 将 dist 目录下的所有内容打包成 dist.zip，并存放到上层目录
-                    // 关键修复：先进入 dist 目录再打包，可以确保 zip 包解压后直接是项目文件，而不是包含一个顶层的 dist 目录
-                    sh 'zip -qr ../dist.zip .'
-                }
+                // 修正：在项目根目录执行 zip 命令，确保 zip 包解压后会有一个顶层的 dist 目录
+                sh 'zip -qr dist.zip dist'
                 // 将生成的 dist.zip 文件作为本次构建的产物进行归档
                 // 归档后，可以方便地从 Jenkins 的构建历史页面下载，也便于其他任务或阶段使用
                 archiveArtifacts artifacts: 'dist.zip', followSymlinks: false
@@ -190,8 +186,12 @@ if (isProd) {
                                 rm -rf "\${HTML_DIR:?}"/*
 
                                 echo "--> 正在解压新版本..."
-                                # 将刚刚上传的 dist.zip 解压到应用目录
-                                unzip -q -o "\$DIST_ZIP" -d "\$HTML_DIR"
+                                # 将 dist.zip 解压到工作目录，会产生一个名为 'dist' 的子目录
+                                unzip -q -o "\$DIST_ZIP" -d "\$WORK_DIR"
+
+                                echo "--> 正在将解压后的 'dist' 目录重命名为 'html'..."
+                                # 修正：将 'dist' 目录重命名为 'html' 并覆盖旧目录
+                                mv "\$WORK_DIR"/dist "\$HTML_DIR"
 
                                 echo "--> 正在清理临时文件..."
                                 # 删除上传的 zip 包
