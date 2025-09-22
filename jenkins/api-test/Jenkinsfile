@@ -49,7 +49,7 @@ pipeline {
 
                     // 使用变量生成动态的日志消息
                     echo "INFO: 开始从 Gitee 仓库 [${gitUrl}] 检出代码 (分支: ${gitBranch})..."
-
+                    
                     retry(count: 3) {
                         // 在 git 步骤中使用变量
                         git branch: gitBranch,
@@ -73,17 +73,23 @@ pipeline {
                     DYNAMIC_IMAGE_TAG = "${buildDate}-${env.BUILD_NUMBER}"
                     echo "INFO: 本次构建生成的动态镜像标签为: ${env.IMAGE_NAME}:${DYNAMIC_IMAGE_TAG}"
 
-                    // 使用更可靠的方式检查文件变动
+                    // 检查自上次成功构建以来的文件变动
                     echo "INFO: 检查自上次成功构建以来的文件变动..."
                     def changedFiles = ''
-                    // GIT_PREVIOUS_SUCCESSFUL_COMMIT 变量在第一次成功构建后才存在
+                    // 使用更健壮的逻辑：如果GIT_PREVIOUS_SUCCESSFUL_COMMIT存在，则进行比较；否则，使用当前提交与其父提交进行比较。
                     if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
                         echo "INFO: 对比当前 commit (${env.GIT_COMMIT}) 与上次成功 commit (${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT})..."
                         changedFiles = sh(returnStdout: true, script: "git diff --name-only ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT} ${env.GIT_COMMIT}").trim()
                     } else {
-                        // 如果是第一次构建，我们默认需要构建镜像
-                        echo "WARNING: 未找到上次成功构建的 commit ID，将默认认为 Dockerfile 已变动。"
-                        changedFiles = 'Dockerfile' // 强制包含 Dockerfile
+                        // 如果是第一次构建或上次构建失败，则检查当前提交与它的父提交之间的变动。
+                        echo "WARNING: 未找到上次成功构建的 commit ID，将使用 'HEAD' 与其父提交进行文件变动对比。"
+                        try {
+                            changedFiles = sh(returnStdout: true, script: "git diff --name-only HEAD^ HEAD").trim()
+                        } catch (e) {
+                            // 如果是仓库的第一次提交，'HEAD^' 会失败，此时假定有变动
+                            echo "WARNING: git diff HEAD^ HEAD 失败，可能为第一次提交，将默认认为 Dockerfile 已变动。"
+                            changedFiles = 'Dockerfile'
+                        }
                     }
 
                     echo "INFO: 本次构建涉及的变动文件:\n${changedFiles}"
