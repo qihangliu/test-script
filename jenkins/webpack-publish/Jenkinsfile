@@ -9,12 +9,12 @@ pipeline {
             // 关键：挂载两个命名卷（named volumes），避免冲突并最大化利用缓存
             // - npm-cache: 用于缓存 npm 下载的包文件（tarballs），避免重复从网络下载
             // - node-modules-cache: 用于持久化整个 node_modules 目录，这是实现下面“极速增量安装”策略的核心基础。
-            //   Webpack 的 .cache 目录是 node_modules 的子目录，因此会自动被这个卷持久化。
+            //    Webpack 的 .cache 目录是 node_modules 的子目录，因此会自动被这个卷持久化。
             args '-u root:root -v npm-cache:/root/.npm -v node-modules-cache:/workspace/node_modules --entrypoint='
         }
     }
 
-     stages {
+      stages {
         // ====================================================================
         // 阶段：检出代码
         // ====================================================================
@@ -79,36 +79,39 @@ pipeline {
                 // 只清理最终打包的 zip 文件，Vue CLI 的 build 命令会自动清理 dist 目录
                 sh 'rm -f dist.zip || true'
 
-                // --- 注入多线程配置 ---
+                // --- 注入多线程配置并禁用 Lint ---
                 script {
                     def originalConfig = readFile('vue.config.js')
                     def injectedCode = """
-                    // START: Injected multi-threading config
-                    const os = require('os');
-                    const isProd = process.env.NODE_ENV === 'production';
-                    if (isProd) {
-                        console.log('正在为 Babel-loader 注入多线程配置...');
-                        config.module
-                            .rule('js')
-                            .use('cache-loader')
-                            .loader('cache-loader')
-                            .end()
-                            .use('thread-loader')
-                            .loader('thread-loader')
-                            .options({
-                                workers: os.cpus().length - 1,
-                                poolTimeout: 2000
-                            })
-                            .before('babel-loader');
-                    }
-                    // END: Injected multi-threading config
-                    """
+// START: Injected multi-threading config and Lint disable
+const os = require('os');
+const isProd = process.env.NODE_ENV === 'production';
+if (isProd) {
+    console.log('正在为 Babel-loader 注入多线程配置...');
+    config.module
+        .rule('js')
+        .use('cache-loader')
+        .loader('cache-loader')
+        .end()
+        .use('thread-loader')
+        .loader('thread-loader')
+        .options({
+            workers: os.cpus().length - 1,
+            poolTimeout: 2000
+        })
+        .before('babel-loader');
+}
+// END: Injected multi-threading config and Lint disable
+"""
                     def modifiedConfig = originalConfig.replaceFirst(
-                        'chainWebpack: config => \\{',
+                        java.util.regex.Pattern.quote('chainWebpack: config => {'),
                         "chainWebpack: config => {\n${injectedCode}"
                     )
+                    // 关键修改：将 lintOnSave: undefined, 替换为 lintOnSave: false,
+                    modifiedConfig = modifiedConfig.replace('lintOnSave: undefined,', 'lintOnSave: false,')
+
                     writeFile(file: 'vue.config.js', text: modifiedConfig)
-                    echo "INFO: 已在内存中修改并写回 vue.config.js。"
+                    echo "INFO: 已在内存中修改并写回 vue.config.js，并已禁用 Lint。"
                 }
 
                 // 使用 withEnv 块来临时设置环境变量
@@ -116,10 +119,8 @@ pipeline {
                 withEnv(['NODE_OPTIONS=--max-old-space-size=8192', 'BROWSERSLIST_IGNORE_OLD_DATA=true', 'BROWSERSLIST_UPDATE=false']) {
                     echo "INFO: 使用 NODE_OPTIONS=${env.NODE_OPTIONS} 编译项目..."
                     // 核心构建命令
-                    // - NODE_ENV=production: 触发所有生产环境优化（代码压缩、tree-shaking等）
-                    // - npm run build: 执行在 package.json 中定义的 build 脚本
-                    // - --no-lint: 跳过 ESLint 代码规范检查，专注于编译任务，加速构建
-                    sh 'NODE_ENV=production npm run build -- --no-lint'
+                    // 移除了 --no-lint 参数，因为现在已经在配置文件中禁用了 Lint 检查
+                    sh 'NODE_ENV=production npm run build'
                 }
             }
         }
