@@ -71,22 +71,26 @@ pipeline {
                     def originalConfig = readFile('vue.config.js')
                     def injectedCode = """
 // START: Injected multi-threading config and Lint disable
-const os = require('os');
 const isProd = process.env.NODE_ENV === 'production';
 if (isProd) {
-    console.log('正在为 Babel-loader 注入多线程配置...');
-    config.module
-        .rule('js')
-        .use('cache-loader')
-        .loader('cache-loader')
-        .end()
-        .use('thread-loader')
-        .loader('thread-loader')
-        .options({
-            workers: os.cpus().length - 1,
-            poolTimeout: 2000
-        })
-        .before('babel-loader');
+    console.log('✅ INFO: vue.config.js 注入成功，正在为 Babel-loader 注入多线程和缓存配置...');
+    const jsRule = config.module.rule('js');
+    if (jsRule) {
+        console.log('✅ 确认: 已成功找到 js 规则，开始注入 loader...');
+        jsRule.use('cache-loader')
+            .loader('cache-loader')
+            .end()
+            .use('thread-loader')
+            .loader('thread-loader')
+            .options({
+                workers: 8, // 硬编码核心数
+                poolTimeout: 2000
+            })
+            .before('babel-loader');
+        console.log('✅ 确认: cache-loader 和 thread-loader 已成功注入。');
+    } else {
+        console.log('❌ 警告: 未找到 js 规则，无法注入 loader。');
+    }
 }
 // END: Injected multi-threading config and Lint disable
 """
