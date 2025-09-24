@@ -5,10 +5,13 @@ pipeline {
     agent {
         docker {
             image 'node:14.15.0'
-            // 关键：挂载两个命名卷，避免冲突
-            // - npm-cache: 用于缓存 npm 下载的包
-            // - node-modules-cache: 用于持久化 node_modules 目录（包含 .cache），实现极速增量安装 + 编译缓存
-            args '-u root:root -v npm-cache:/root/.npm -v node-modules-cache:/workspace/node_modules --entrypoint='
+            args """
+                -u root:root \
+                -v npm-cache:/root/.npm \
+                -v node-modules-cache:/var/jenkins_home/workspace/${env.JOB_NAME}/node_modules \
+                -v build-cache:/var/jenkins_home/workspace/${env.JOB_NAME}/node_modules/.cache \
+                --entrypoint=
+            """
         }
     }
 
@@ -66,48 +69,43 @@ pipeline {
                 echo 'INFO: 正在清理旧的构建产物...'
                 sh 'rm -f dist.zip || true'
 
-                // --- 注入多线程配置并禁用 Lint ---
+                // --- 注入优化配置并禁用 Lint ---
                 script {
                     def originalConfig = readFile('vue.config.js')
+                    // 修正注入逻辑：
+                    // 在 .tap 函数中，使用 {...options, cacheDirectory: true} 的方式来安全地合并配置。
+                    // 这样做可以确保即使原始的 options 是 undefined，代码也能正常工作。
                     def injectedCode = """
-// START: Injected multi-threading config and Lint disable
-const isProd = process.env.NODE_ENV === 'production';
-if (isProd) {
-    console.log('✅ INFO: vue.config.js 注入成功，正在为 Babel-loader 注入多线程和缓存配置...');
-    const jsRule = config.module.rule('js');
-    if (jsRule) {
-        console.log('✅ 确认: 已成功找到 js 规则，开始注入 loader...');
-        jsRule.use('cache-loader')
-            .loader('cache-loader')
-            .end()
-            .use('thread-loader')
-            .loader('thread-loader')
-            .options({
-                workers: 8, // 硬编码核心数
-                poolTimeout: 2000
-            })
-            .before('babel-loader');
-        console.log('✅ 确认: cache-loader 和 thread-loader 已成功注入。');
-    } else {
-        console.log('❌ 警告: 未找到 js 规则，无法注入 loader。');
-    }
+// START: Injected build optimization
+const jsRule = config.module.rule('js');
+if (jsRule) {
+    console.log("✅ INFO: 已成功找到 'js' 规则，正在为 babel-loader 开启内置缓存...");
+    jsRule.use('babel-loader')
+        .tap(options => {
+            // 修正：无论原始的 options 是否存在，都返回一个包含 cacheDirectory 的新对象
+            return {
+                ...options,
+                cacheDirectory: true
+            };
+        });
+    console.log("✅ INFO: babel-loader 缓存已成功启用。");
+} else {
+    console.log("❌ 警告: 未找到 'js' 规则，无法为 babel-loader 开启缓存。");
 }
-// END: Injected multi-threading config and Lint disable
+// END: Injected build optimization
 """
                     def modifiedConfig = originalConfig.replaceFirst(
                         java.util.regex.Pattern.quote('chainWebpack: config => {'),
                         "chainWebpack: config => {\n${injectedCode}"
                     )
-                    // 关键修改：将 lintOnSave: undefined, 替换为 lintOnSave: false,
-                    modifiedConfig = modifiedConfig.replace('lintOnSave: undefined,', 'lintOnSave: false,')
+                    modifiedConfig = modifiedConfig.replaceAll('lintOnSave:.*?,', 'lintOnSave: false,')
 
                     writeFile(file: 'vue.config.js', text: modifiedConfig)
-                    echo "INFO: 已在内存中修改并写回 vue.config.js，并已禁用 Lint。"
+                    echo "INFO: 已在内存中修改并写回 vue.config.js，并已禁用 Lint 和开启了 babel-loader 缓存。"
                 }
 
                 withEnv(['NODE_OPTIONS=--max-old-space-size=8192', 'BROWSERSLIST_IGNORE_OLD_DATA=true', 'BROWSERSLIST_UPDATE=false']) {
                     echo "INFO: 正在使用 NODE_OPTIONS=${env.NODE_OPTIONS} 进行编译..."
-                    // 移除 --no-lint 参数，因为我们已通过修改配置文件来禁用它
                     sh 'NODE_ENV=production npm run build'
                 }
             }
@@ -119,7 +117,6 @@ if (isProd) {
         stage('Package Artifact') {
             steps {
                 echo 'INFO: 正在将 dist 目录打包为 dist.zip...'
-                // 修正：在项目根目录执行 zip 命令，确保 dist 目录被包含在压缩包中
                 sh 'zip -qr dist.zip dist'
                 archiveArtifacts artifacts: 'dist.zip', followSymlinks: false
             }
