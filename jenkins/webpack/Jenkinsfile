@@ -1,4 +1,3 @@
-// 声明式流水线
 pipeline {
     // ====================================================================
     // 1. 定义构建环境
@@ -6,11 +5,9 @@ pipeline {
     agent {
         docker {
             image 'node:14.15.0'
-            // 关键修正：为 Docker 容器分配更多的内存和 CPU 资源，防止构建进程卡死
+            // 将缓存卷的名称与 Job 名称绑定，实现每个 Job 拥有独立的缓存
             args """
                 -u root:root \
-                --memory="10g" \
-                --cpus="10" \
                 -v npm-cache:/root/.npm \
                 -v node-modules-cache-${env.JOB_NAME}:/var/jenkins_home/workspace/${env.JOB_NAME}/node_modules \
                 -v build-cache-${env.JOB_NAME}:/var/jenkins_home/workspace/${env.JOB_NAME}/node_modules/.cache \
@@ -134,17 +131,12 @@ if (jsRule) {
                 script {
                     def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
                     def shareRoot = "${env.JENKINS_HOME}/share"
-                    // 关键修改：创建一个以 Job 名称命名的子目录，用于存放该项目的所有归档
-                    def projectDir = "${shareRoot}/${env.JOB_NAME}"
-                    def targetDir = "${projectDir}/${env.JOB_NAME}-${timestamp}"
+                    def targetDir = "${shareRoot}/${env.JOB_NAME}-${timestamp}"
 
                     sh """
                         set -e
-                        echo "正在创建项目归档目录: ${projectDir}"
-                        mkdir -p "${projectDir}" // 确保项目根目录存在
-
-                        echo "正在创建本次构建的目标目录: ${targetDir}"
-                        mkdir -p "${targetDir}" // 创建本次构建的具体目录
+                        echo "正在创建目标目录: ${targetDir}"
+                        mkdir -p "${targetDir}"
 
                         echo "将当前工作区标记为 Git 安全目录..."
                         git config --global --add safe.directory ${env.WORKSPACE}
@@ -159,8 +151,8 @@ if (jsRule) {
 --------------------------------------------------------
 文件已成功归档到目标目录
 您现在可以通过以下网络路径从 Windows 访问：
-\\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}\\\\${env.JOB_NAME}-${timestamp}
-或者先访问 \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME} 再进入对应目录
+\\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}-${timestamp}
+或者先访问 \\\\\\\\10.189.189.245\\\\share 再进入对应目录
 --------------------------------------------------------
 EOF
                     """
