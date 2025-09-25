@@ -1,4 +1,3 @@
-// Jenkinsfile
 pipeline {
     // 统一在顶层定义全局构建环境
     agent {
@@ -63,45 +62,45 @@ pipeline {
                 script {
                     echo 'INFO: 开始归档构建产物...'
 
-                    // 1. 动态查找构建产物，使其更健壮
+                    // 1. 动态查找构建产物
                     def files = findFiles(glob: 'target/*.jar')
                     if (files.length == 0) {
                         error "错误：在 target/ 目录中未找到任何 .jar 文件，无法归档！"
                     }
-                    def jarFile = files[0] // 获取找到的第一个 JAR 文件
+                    def jarFile = files[0]
 
-                    // 2. 准备归档目录和信息
+                    // 2. 准备归档目录 (share/JOB_NAME/JOB_NAME-TIMESTAMP)
                     def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
                     def shareRoot = "/var/jenkins_home/share"
-                    def targetDir = "${shareRoot}/opwb-manage-${timestamp}"
+                    def targetDir = "${shareRoot}/${env.JOB_NAME}/${env.JOB_NAME}-${timestamp}"
 
-                    // 3. 执行归档到共享目录的 Shell 脚本
+                    // 3. 执行归档 Shell 脚本
                     sh """
                         set -e
                         echo "[1/3] 正在创建共享归档目录: ${targetDir}"
-                        mkdir -p "${targetDir}/opwb-manage"
+                        mkdir -p "${targetDir}"
 
                         echo "[2/3] 正在归档 Git 提交日志..."
                         git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s" > "${targetDir}/git_commit_log.txt"
 
                         echo "[3/3] 正在拷贝 JAR 包: ${jarFile.name} ..."
-                        cp ${jarFile.path} "${targetDir}/opwb-manage/"
+                        cp ${jarFile.path} "${targetDir}/"
 
                         cat <<EOF
 
 ========================================================================
 ✅ 构建产物已成功归档至共享目录!
 
-   任务名称: opwb-manage
+   任务名称: ${env.JOB_NAME}
 
    Windows 可通过以下路径访问：
-   \\\\\\\\10.189.189.245\\\\share\\\\opwb-manage-${timestamp}
+   \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}\\\\${env.JOB_NAME}-${timestamp}
 ========================================================================
 
 EOF
                     """
 
-                    // 4. 新增：使用 Jenkins 内置功能归档，方便从UI下载
+                    // 4. Jenkins 内置归档
                     echo "INFO: 正在归档 ${jarFile.name} 到 Jenkins 本身..."
                     archiveArtifacts artifacts: jarFile.path, fingerprint: true
 
