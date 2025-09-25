@@ -1,3 +1,4 @@
+// Jenkinsfile
 pipeline {
     // ====================================================================
     // 1. 定义构建环境
@@ -53,7 +54,7 @@ pipeline {
                     if [ -f "$SAVED_CHECKSUM_FILE" ] && [ "$CURRENT_CHECKSUM" = "$(cat "$SAVED_CHECKSUM_FILE")" ]; then
                         echo "--> 成功: package-lock.json 未发生变化，跳过依赖安装。"
                     else
-                        echo "--> INFO: package-lock.json 已发生变化，正在执行增量 'npm install'。"
+                        echo "--> INFO: package-lock.json 已发生变化，正在执行增量 'npm install'."
                         npm install --no-audit --no-fund
                         echo "--> INFO: 正在为 package-lock.json 保存新的校验和。"
                         echo "$CURRENT_CHECKSUM" > "$SAVED_CHECKSUM_FILE"
@@ -131,7 +132,7 @@ if (jsRule) {
                 script {
                     def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
                     def shareRoot = "${env.JENKINS_HOME}/share"
-                    def targetDir = "${shareRoot}/${env.JOB_NAME}-${timestamp}"
+                    def targetDir = "${shareRoot}/${env.JOB_NAME}/${env.JOB_NAME}-${timestamp}"
 
                     sh """
                         set -e
@@ -148,12 +149,15 @@ if (jsRule) {
                         cp "${env.WORKSPACE}/dist.zip" "${targetDir}/"
 
                         cat <<EOF
---------------------------------------------------------
-文件已成功归档到目标目录
-您现在可以通过以下网络路径从 Windows 访问：
-\\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}-${timestamp}
-或者先访问 \\\\\\\\10.189.189.245\\\\share 再进入对应目录
---------------------------------------------------------
+
+========================================================================
+✅ 构建产物已成功归档
+
+   任务名称: ${env.JOB_NAME}
+   构建时间: ${timestamp}
+   归档路径: \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}\\\\${env.JOB_NAME}-${timestamp}
+========================================================================
+
 EOF
                     """
                 }
