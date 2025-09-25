@@ -1,0 +1,40 @@
+# docker-compose.yml
+
+services:
+  jenkins:
+    container_name: jenkins
+    restart: always
+    image: jenkins:test
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkinshome:/var/jenkins_home
+      - /home/share:/var/jenkins_home/share
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./jenkins.yml:/var/jenkins_home/jenkins.yml
+
+    group_add:
+      - "994" # 重要！请务必替换为您在宿主机上查到的 docker 组 GID
+
+    environment:
+      - CASC_JENKINS_CONFIG=/var/jenkins_home/jenkins.yml
+      - JENKINS_OPTS="-Dhudson.model.DirectoryBrowserSupport.CSP=script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+
+    # ====================== 关键修复：添加资源限制 ======================
+    # 这是解决构建缓慢的根本性修复。
+    # 我们为 Jenkins 容器分配了充足的 CPU 和内存资源，
+    # 这样它内部的构建任务就不会再因为资源不足而被“饿死”。
+    deploy:
+      resources:
+        limits:
+          # 根据您服务器的硬件配置，分配 22 个 CPU 核心
+          cpus: '22.0'
+          # 根据您服务器 24G 的总内存，为其分配 22G
+          memory: 22G
+    # ====================================================================
+
+volumes:
+  jenkinshome:
+    external: true
+    name: jenkinshome
