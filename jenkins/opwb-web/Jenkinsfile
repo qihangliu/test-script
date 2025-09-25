@@ -1,0 +1,238 @@
+pipeline {
+    // 1. 定义构建环境
+    agent {
+        docker {
+            image 'maven:3.9.11-eclipse-temurin-21'
+            args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        }
+    }
+
+    stages {
+        // ====================================================================
+        //  阶段 1: 拉取代码 (保持不变)
+        // ====================================================================
+        stage('Checkout') {
+            steps {
+                echo 'INFO: 开始从 Git 仓库拉取代码...'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/workbench']],
+                    userRemoteConfigs: [[
+                        url: 'https://gitee.com/changyunhuizhi/opwb-services.git',
+                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                    ]]
+                ])
+            }
+        }
+
+        // ====================================================================
+        //  阶段 2: 构建小包
+        // ====================================================================
+        stage('Build Small Package') {
+            steps {
+                configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
+                    script {
+                        echo 'INFO: 开始为整个项目构建 Jar 包 (跳过测试)...'
+                        sh 'mvn -s ${MAVEN_SETTINGS} clean package -DskipTests'
+
+                        echo 'INFO: 开始为 opwb-web 模块分离依赖库...'
+                        sh 'mvn -s ${MAVEN_SETTINGS} -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
+                        echo 'SUCCESS: 所有模块构建完成。'
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 3: 精确对比并创建增量更新包
+        // ====================================================================
+        stage('Create True Incremental Package') {
+            steps {
+                script {
+                    echo "INFO: 准备进行文件内容级对比，创建真正的增量包..."
+
+                    sh '''
+                        set -e
+
+                        # 1. 准备目录
+                        echo "INFO: Preparing directories..."
+                        mkdir -p previous_build update_package/dependencies
+
+                        SHARE_ROOT="/var/jenkins_home/share"
+                        BASELINE_PATH="${SHARE_ROOT}/${JOB_NAME}/last_successful_artifacts"
+
+                        # 2. 从共享位置复制基线版本
+                        if [ -d "${BASELINE_PATH}" ]; then
+                            echo "INFO: Found baseline at ${BASELINE_PATH}. Copying for comparison."
+                            cp -a "${BASELINE_PATH}/." previous_build/
+                        else
+                            echo "INFO: No baseline found. This will be a full package build."
+                        fi
+
+                        # 3. 精确对比业务 Jar 包
+                        echo "INFO: [1/3] Comparing business JARs..."
+                        TERMINAL_JAR_NEW=$(find opwb-terminal/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar")
+                        TERMINAL_JAR_OLD="previous_build/opwb-terminal.jar"
+                        if [ ! -f "$TERMINAL_JAR_OLD" ] || ! md5sum -c <(echo "$(md5sum "$TERMINAL_JAR_OLD" | awk '{print $1}')  $TERMINAL_JAR_NEW") --status 2>/dev/null; then
+                            echo "  -> CHANGE: opwb-terminal.jar will be packaged."
+                            cp "$TERMINAL_JAR_NEW" update_package/opwb-terminal.jar
+                        else
+                            echo "  -> UNCHANGED: opwb-terminal.jar."
+                        fi
+
+                        WEB_JAR_NEW=$(find opwb-web/target -maxdepth 1 -name "*.jar.original")
+                        if [ -z "$WEB_JAR_NEW" ]; then WEB_JAR_NEW=$(find opwb-web/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar"); fi
+                        WEB_JAR_OLD="previous_build/opwb-web.jar"
+                        if [ ! -f "$WEB_JAR_OLD" ] || ! md5sum -c <(echo "$(md5sum "$WEB_JAR_OLD" | awk '{print $1}')  $WEB_JAR_NEW") --status 2>/dev/null; then
+                            echo "  -> CHANGE: opwb-web.jar will be packaged."
+                            cp "$WEB_JAR_NEW" update_package/opwb-web.jar
+                        else
+                            echo "  -> UNCHANGED: opwb-web.jar."
+                        fi
+
+                        # 4. 精确对比依赖库 (新增、变更、删除)
+                        echo "INFO: [2/3] Comparing opwb-web dependencies..."
+                        DELETE_MANIFEST="update_package/delete.txt"
+                        touch $DELETE_MANIFEST
+
+                        if [ ! -d "previous_build/dependencies" ] || [ -z "$(ls -A previous_build/dependencies)" ]; then
+                            echo "  -> No baseline dependencies found, packaging all current dependencies."
+                            cp -r opwb-web/target/dependencies/. update_package/dependencies/
+                        else
+                            # 查找新增和变更的依赖
+                            diff -qr previous_build/dependencies opwb-web/target/dependencies | while read -r line; do
+                                if [[ $line == *"Files"* && $line == *"differ"* ]]; then
+                                    FILE_PATH=$(echo "$line" | sed -n 's/.* and \\(.*\\) differ/\\1/p')
+                                    RELATIVE_PATH=$(basename "$FILE_PATH")
+                                    echo "  -> CHANGE: Dependency '$RELATIVE_PATH' will be packaged."
+                                    cp "$FILE_PATH" "update_package/dependencies/$RELATIVE_PATH"
+                                elif [[ $line == "Only in"* ]]; then
+                                    FILE_PATH=$(echo "$line" | sed -n 's/Only in \\(.[^:]*\\): \\(..*\\)/\\1\\/\\2/p')
+                                    RELATIVE_PATH=$(basename "$FILE_PATH")
+                                    echo "  -> NEW: Dependency '$RELATIVE_PATH' will be packaged."
+                                    cp "$FILE_PATH" "update_package/dependencies/$RELATIVE_PATH"
+                                fi
+                            done
+
+                            # 查找被删除的依赖
+                            diff -qr opwb-web/target/dependencies previous_build/dependencies | while read -r line; do
+                                if [[ $line == "Only in"* ]]; then
+                                    FILE_PATH=$(echo "$line" | sed -n 's/Only in \\(.[^:]*\\): \\(..*\\)/\\1\\/\\2/p')
+                                    RELATIVE_PATH=$(basename "$FILE_PATH")
+                                    echo "  -> DELETED: Dependency '$RELATIVE_PATH' will be added to delete.txt."
+                                    echo "dependencies/$RELATIVE_PATH" >> $DELETE_MANIFEST
+                                fi
+                            done
+                        fi
+
+                        # 5. 根据是否有变更来决定是否打包
+                        echo "INFO: [3/3] Finalizing package..."
+                        # 如果删除清单为空, 则删掉它
+                        if [ -f "$DELETE_MANIFEST" ] && [ ! -s "$DELETE_MANIFEST" ]; then
+                            rm $DELETE_MANIFEST
+                        fi
+
+                        if [ -z "$(ls -A update_package)" ]; then
+                            echo "-------------------------------------------------------------"
+                            echo "SUMMARY: NO CHANGES DETECTED. No update package is needed."
+                            echo "-------------------------------------------------------------"
+                            echo "NO_CHANGES_DETECTED=true" > build_vars.properties
+                        else
+                            echo "-------------------------------------------------------------"
+                            echo "SUMMARY: Changes detected. Creating update package..."
+                            echo "-------------------------------------------------------------"
+                            echo "NO_CHANGES_DETECTED=false" > build_vars.properties
+                            cd update_package
+                            tar -czf ../update.tar.gz .
+                            cd ..
+                            echo "SUCCESS: Update package created as update.tar.gz."
+                        fi
+                    '''
+                    // 读取shell脚本生成的标记
+                    def props = readProperties file: 'build_vars.properties'
+                    env.NO_CHANGES_DETECTED = props.NO_CHANGES_DETECTED
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 4: 归档到共享目录
+        // ====================================================================
+        stage('Archive to Share') {
+            when { expression { env.NO_CHANGES_DETECTED == 'false' } }
+            steps {
+                script {
+                    echo "INFO: 开始归档增量更新包到共享目录..."
+                    def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
+                    def shareRoot = "/var/jenkins_home/share"
+                    def targetDir = "${shareRoot}/${env.JOB_NAME}/${env.JOB_NAME}-${timestamp}"
+                    sh """
+                        set -e
+                        mkdir -p "${targetDir}"
+                        cp update.tar.gz "${targetDir}/"
+                        cat <<EOF
+
+========================================================================
+✅ 增量更新包已成功归档
+
+  任务名称: ${env.JOB_NAME}
+  构建时间: ${timestamp}
+  归档路径: \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}\\\\${env.JOB_NAME}-${timestamp}
+
+  **重要**: 如果包内包含 'delete.txt', 请在部署时优先处理。
+========================================================================
+EOF
+                    """
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 5: Jenkins 内部归档
+        // ====================================================================
+        stage('Archive Jenkins Artifacts') {
+            when { expression { env.NO_CHANGES_DETECTED == 'false' } }
+            steps {
+                echo 'INFO: 开始归档增量包至 Jenkins...'
+                archiveArtifacts artifacts: 'update.tar.gz', allowEmptyArchive: true
+            }
+        }
+    }
+
+    // ====================================================================
+    //  构建后操作
+    // ====================================================================
+    post {
+        success {
+            echo 'INFO: Build successful. Updating the full baseline for next build...'
+            script {
+                def shareRoot = "/var/jenkins_home/share"
+                def baselinePath = "${shareRoot}/${env.JOB_NAME}/last_successful_artifacts"
+                sh """
+                    set -e
+                    BASELINE_PATH="${baselinePath}"
+                    echo "INFO: Updating full baseline at \${BASELINE_PATH}"
+                    rm -rf "\${BASELINE_PATH}"
+                    mkdir -p "\${BASELINE_PATH}/dependencies"
+
+                    # 1. 复制 opwb-web 的依赖库
+                    cp -a opwb-web/target/dependencies/. "\${BASELINE_PATH}/dependencies/"
+
+                    # 2. 复制 opwb-terminal.jar
+                    TERMINAL_JAR=\$(find opwb-terminal/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar")
+                    if [ -n "\$TERMINAL_JAR" ]; then cp "\$TERMINAL_JAR" "\${BASELINE_PATH}/opwb-terminal.jar"; fi
+
+                    # 3. 复制 opwb-web.jar (瘦包)
+                    WEB_JAR=\$(find opwb-web/target -maxdepth 1 -name "*.jar.original")
+                    if [ -z "\$WEB_JAR" ]; then WEB_JAR=\$(find opwb-web/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar"); fi
+                    if [ -n "\$WEB_JAR" ]; then cp "\$WEB_JAR" "\${BASELINE_PATH}/opwb-web.jar"; fi
+
+                    echo "SUCCESS: Full baseline updated."
+                """
+            }
+        }
+        always {
+            echo '构建流程结束。'
+        }
+    }
+}
