@@ -2,7 +2,7 @@
 pipeline {
     agent {
         docker {
-            image 'maven:3-eclipse-temurin-21'
+            image 'maven:3.9.11-eclipse-temurin-21'
             args '-u root:root -v maven-m2-cache:/root/.m2/repository'
         }
     }
@@ -98,7 +98,7 @@ pipeline {
                 script {
                     def timestamp = new Date().format('yy-MM-dd_HH-mm-ss', TimeZone.getTimeZone('Asia/Shanghai'))
                     def shareRoot = "/var/jenkins_home/share"
-                    def targetDir = "${shareRoot}/${env.JOB_NAME}-${timestamp}"
+                    def targetDir = "${shareRoot}/${env.JOB_NAME}/${env.JOB_NAME}-${timestamp}"
 
                     def excludePattern = '**/target/*-sources.jar,**/target/*-javadoc.jar'
                     def trackerJar = findFiles(glob: 'main-project/devops-jobtracker/target/*.jar', excludes: excludePattern)
@@ -112,17 +112,15 @@ pipeline {
                     sh """
                         set -e
                         echo "INFO: 正在创建归档目录: ${targetDir}"
-                        mkdir -p "${targetDir}/devops-jobtracker"
-                        mkdir -p "${targetDir}/devops-core"
-                        mkdir -p "${targetDir}/devops-tasktracker"
+                        mkdir -p "${targetDir}"
 
                         echo "INFO: 正在归档 Git 日志 (从 main-project 目录)..."
                         (cd main-project && git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s") > "${targetDir}/git_commit_log.txt"
 
                         echo "INFO: 正在归档主程序包..."
-                        cp "${trackerJar[0].path}" "${targetDir}/devops-jobtracker/"
-                        cp "${coreJar[0].path}" "${targetDir}/devops-core/"
-                        cp "${taskJar[0].path}" "${targetDir}/devops-tasktracker/"
+                        cp "${trackerJar[0].path}" "${targetDir}/"
+                        cp "${coreJar[0].path}" "${targetDir}/"
+                        cp "${taskJar[0].path}" "${targetDir}/"
 
                         cat <<EOF
 
@@ -132,7 +130,7 @@ pipeline {
    任务名称: ${env.JOB_NAME}
 
    Windows 可通过以下路径访问：
-   \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}-${timestamp}
+   \\\\\\\\10.189.189.245\\\\share\\\\${env.JOB_NAME}\\\\${env.JOB_NAME}-${timestamp}
 ========================================================================
 
 EOF
@@ -159,6 +157,7 @@ EOF
                     def logOutput = sh(script: '(cd main-project && git log --since="7 days ago" --no-merges --pretty=format:"%h - %an, %ar : %s")', returnStdout: true).trim()
                     if (logOutput) {
                         echo 'INFO: 发现新的 Git 提交，将归档日志文件...'
+                        sh 'rm -f git_commit_log.txt'
                         writeFile(file: 'git_commit_log.txt', text: logOutput)
                         artifactsToArchive.add('git_commit_log.txt')
                     } else {
