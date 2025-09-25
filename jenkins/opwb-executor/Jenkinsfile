@@ -4,7 +4,7 @@ pipeline {
     // - 使用命名数据卷 'maven-m2-cache' 持久化 .m2 仓库，加速后续构建
     agent {
         docker {
-            image 'maven:3-eclipse-temurin-21'
+            image 'maven:3.9.11-eclipse-temurin-21'
             args '-u root:root -v maven-m2-cache:/root/.m2/repository'
         }
     }
@@ -48,7 +48,7 @@ pipeline {
         }
         
         // ====================================================================
-        //  阶段 3: 归档构建产物 (在 Jenkins 页面上提供下载)
+        //  阶段 3: 归档构建产物
         // ====================================================================
         stage('Archive Artifacts') {
             steps {
