@@ -33,7 +33,8 @@ pipeline {
                 configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
                     script {
                         echo 'INFO: 开始为整个项目构建 Jar 包 (跳过测试)...'
-                        sh 'mvn -s ${MAVEN_SETTINGS} -T 1C clean package -DskipTests'
+                        // --- 修改: 添加 -Dproject.build.outputTimestamp=1 实现可重现的构建 ---
+                        sh 'mvn -s ${MAVEN_SETTINGS} -T 1C clean package -Dproject.build.outputTimestamp=1 -DskipTests'
 
                         echo 'INFO: 开始为 opwb-web 模块分离依赖库...'
                         sh 'mvn -s ${MAVEN_SETTINGS} -T 8 -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
@@ -102,17 +103,11 @@ pipeline {
                         SELF_MODULES="opwb-terminal opwb-web opwb-dao opwb-bean opwb-service opwb-flow opwb-framework-core opwb-framework-entity opwb-framework-definition"
 
                         for module_name in ${SELF_MODULES}; do
-                            # --- 修改: 使用更健壮的逻辑来查找正确的 Jar 包 ---
                             MODULE_JAR_NEW=""
-                            # 优先查找 .jar.original 文件
                             CANDIDATE=$(find "${module_name}/target" -maxdepth 1 -name "*.jar.original" 2>/dev/null)
-
-                            # 如果找不到，则查找标准的jar，并排除其他类型
                             if [ -z "${CANDIDATE}" ]; then
                                 CANDIDATE=$(find "${module_name}/target" -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" ! -name "*-exec.jar" 2>/dev/null)
                             fi
-
-                            # 安全措施：确保只取一个结果，防止 find 返回多行
                             MODULE_JAR_NEW=$(echo "${CANDIDATE}" | head -n 1)
 
                             if [ -z "${MODULE_JAR_NEW}" ]; then
@@ -268,4 +263,3 @@ EOF
         }
     }
 }
-
