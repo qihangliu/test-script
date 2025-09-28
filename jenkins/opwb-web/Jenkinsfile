@@ -9,7 +9,7 @@ pipeline {
 
     stages {
         // ====================================================================
-        //  阶段 1: 拉取代码 (保持不变)
+        //  阶段 1: 拉取代码
         // ====================================================================
         stage('Checkout') {
             steps {
@@ -33,10 +33,10 @@ pipeline {
                 configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
                     script {
                         echo 'INFO: 开始为整个项目构建 Jar 包 (跳过测试)...'
-                        sh 'mvn -s ${MAVEN_SETTINGS} clean package -DskipTests'
+                        sh 'mvn -s ${MAVEN_SETTINGS} -T 1C clean package -DskipTests'
 
                         echo 'INFO: 开始为 opwb-web 模块分离依赖库...'
-                        sh 'mvn -s ${MAVEN_SETTINGS} -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
+                        sh 'mvn -s ${MAVEN_SETTINGS} -T 8 -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
                         echo 'SUCCESS: 所有模块构建完成。'
                     }
                 }
@@ -44,109 +44,168 @@ pipeline {
         }
 
         // ====================================================================
-        //  阶段 3: 精确对比并创建增量更新包
+        //  阶段 3: 创建增量包
         // ====================================================================
-        stage('Create True Incremental Package') {
+        stage('Create Incremental Package') {
             steps {
                 script {
-                    echo "INFO: 准备进行文件内容级对比，创建真正的增量包..."
+                    echo "INFO: 准备对接 API 获取线上清单，创建增量包..."
 
                     sh '''
+                        #!/bin/bash
                         set -e
 
-                        # 1. 准备目录
-                        echo "INFO: Preparing directories..."
-                        mkdir -p previous_build update_package/dependencies
+                        # 1. 准备目录和 API 配置
+                        echo "INFO: 准备目录和 API 配置..."
+                        mkdir -p update_package/lib
+                        BASELINE_PATH="/var/jenkins_home/share/${JOB_NAME}/last_successful_artifacts"
+                        MANIFEST_FILE="dependency-manifest.txt"
 
-                        SHARE_ROOT="/var/jenkins_home/share"
-                        BASELINE_PATH="${SHARE_ROOT}/${JOB_NAME}/last_successful_artifacts"
+                        # API 配置
+                        API_BASE_URL="http://10.189.189.189:8084"
+                        PASSWORD="2T1C2]]k^T9]Kjl"
 
-                        # 2. 从共享位置复制基线版本
-                        if [ -d "${BASELINE_PATH}" ]; then
-                            echo "INFO: Found baseline at ${BASELINE_PATH}. Copying for comparison."
-                            cp -a "${BASELINE_PATH}/." previous_build/
-                        else
-                            echo "INFO: No baseline found. This will be a full package build."
+                        # 2. 登录并获取 Token
+                        echo "INFO: 正在登录以获取 Token..."
+                        LOGIN_RESPONSE=$(curl -s --location --request POST "${API_BASE_URL}/wt/api/terminalAuth/login" \
+                        --header 'Content-Type: application/json' \
+                        -d "{
+                            \"password\": \"${PASSWORD}\",
+                            \"type\": \"account\"
+                        }")
+                        TOKEN=$(echo "${LOGIN_RESPONSE}" | jq -r '.token')
+                        if [ -z "$TOKEN" ] || [ "$TOKEN" == "null" ]; then
+                            echo "错误: 获取授权 Token 失败。"
+                            echo "登录响应: ${LOGIN_RESPONSE}"
+                            exit 1
                         fi
+                        echo "SUCCESS: 登录成功。"
 
-                        # 3. 精确对比业务 Jar 包
-                        echo "INFO: [1/3] Comparing business JARs..."
-                        TERMINAL_JAR_NEW=$(find opwb-terminal/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar")
-                        TERMINAL_JAR_OLD="previous_build/opwb-terminal.jar"
-                        if [ ! -f "$TERMINAL_JAR_OLD" ] || ! md5sum -c <(echo "$(md5sum "$TERMINAL_JAR_OLD" | awk '{print $1}')  $TERMINAL_JAR_NEW") --status 2>/dev/null; then
-                            echo "  -> CHANGE: opwb-terminal.jar will be packaged."
-                            cp "$TERMINAL_JAR_NEW" update_package/opwb-terminal.jar
-                        else
-                            echo "  -> UNCHANGED: opwb-terminal.jar."
+                        # 3. 使用 Token 获取并处理线上清单
+                        echo "INFO: 正在从 API 获取清单..."
+                        MANIFEST_JSON=$(curl -s --location --request GET "${API_BASE_URL}/automation/getLibJarList/?path=/data/server/opwbworkbench/lib/" \
+                        --header "Authorization: Bearer ${TOKEN}")
+
+                        if [[ $(echo "${MANIFEST_JSON}" | grep -c "Internal Server Error") -gt 0 ]] || [[ -z "${MANIFEST_JSON}" ]]; then
+                            echo "错误: API 返回错误或空响应。"
+                            echo "API 响应: ${MANIFEST_JSON}"
+                            exit 1
                         fi
-
-                        WEB_JAR_NEW=$(find opwb-web/target -maxdepth 1 -name "*.jar.original")
-                        if [ -z "$WEB_JAR_NEW" ]; then WEB_JAR_NEW=$(find opwb-web/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar"); fi
-                        WEB_JAR_OLD="previous_build/opwb-web.jar"
-                        if [ ! -f "$WEB_JAR_OLD" ] || ! md5sum -c <(echo "$(md5sum "$WEB_JAR_OLD" | awk '{print $1}')  $WEB_JAR_NEW") --status 2>/dev/null; then
-                            echo "  -> CHANGE: opwb-web.jar will be packaged."
-                            cp "$WEB_JAR_NEW" update_package/opwb-web.jar
-                        else
-                            echo "  -> UNCHANGED: opwb-web.jar."
+                        echo "${MANIFEST_JSON}" | jq -r '.result[]' > ${MANIFEST_FILE}
+                        if [ ! -s "${MANIFEST_FILE}" ]; then
+                            echo "警告: 从 API 获取的清单为空，将按全量包处理。"
                         fi
+                        echo "SUCCESS: 已根据 API 响应创建清单文件。"
 
-                        # 4. 精确对比依赖库 (新增、变更、删除)
-                        echo "INFO: [2/3] Comparing opwb-web dependencies..."
+                        # 4. 对比业务 Jar 包 (MD5内容对比)
+                        echo "INFO: [1/3] 正在将自定义业务 Jar 包与上次成功构建对比..."
+                        SELF_MODULES="opwb-terminal opwb-web opwb-dao opwb-bean opwb-service opwb-flow opwb-framework-core opwb-framework-entity opwb-framework-definition"
+
+                        for module_name in ${SELF_MODULES}; do
+                            # --- 修改: 使用更健壮的逻辑来查找正确的 Jar 包 ---
+                            MODULE_JAR_NEW=""
+                            # 优先查找 .jar.original 文件
+                            CANDIDATE=$(find "${module_name}/target" -maxdepth 1 -name "*.jar.original" 2>/dev/null)
+
+                            # 如果找不到，则查找标准的jar，并排除其他类型
+                            if [ -z "${CANDIDATE}" ]; then
+                                CANDIDATE=$(find "${module_name}/target" -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" ! -name "*-exec.jar" 2>/dev/null)
+                            fi
+
+                            # 安全措施：确保只取一个结果，防止 find 返回多行
+                            MODULE_JAR_NEW=$(echo "${CANDIDATE}" | head -n 1)
+
+                            if [ -z "${MODULE_JAR_NEW}" ]; then
+                                echo "  -> 警告: 找不到模块 '${module_name}' 的 Jar 包，已跳过。"
+                                continue
+                            fi
+
+                            MODULE_JAR_OLD_FIXED="${BASELINE_PATH}/${module_name}.jar"
+
+                            if [ ! -f "$MODULE_JAR_OLD_FIXED" ]; then
+                                echo "  -> 新增: ${module_name}.jar (无基线)，打包中。"
+                                cp "$MODULE_JAR_NEW" "update_package/$(basename ${MODULE_JAR_NEW})"
+                            else
+                                CHECKSUM_OLD=$(md5sum "$MODULE_JAR_OLD_FIXED" | awk '{print $1}')
+                                CHECKSUM_NEW=$(md5sum "$MODULE_JAR_NEW" | awk '{print $1}')
+                                if [ "$CHECKSUM_OLD" != "$CHECKSUM_NEW" ]; then
+                                    echo "  -> 变更: ${module_name}.jar 内容已改变，打包中。"
+                                    cp "$MODULE_JAR_NEW" "update_package/$(basename ${MODULE_JAR_NEW})"
+                                else
+                                    echo "  -> 未变: ${module_name}.jar。"
+                                fi
+                            fi
+                        done
+
+                        # 5. 对比第三方依赖库 (基于API清单)
+                        echo "INFO: [2/3] 正在将第三方依赖与 API 清单对比..."
                         DELETE_MANIFEST="update_package/delete.txt"
                         touch $DELETE_MANIFEST
 
-                        if [ ! -d "previous_build/dependencies" ] || [ -z "$(ls -A previous_build/dependencies)" ]; then
-                            echo "  -> No baseline dependencies found, packaging all current dependencies."
-                            cp -r opwb-web/target/dependencies/. update_package/dependencies/
+                        CURRENT_DEPS_FILE="current_deps.txt"
+                        if [ -d "opwb-web/target/dependencies" ] && [ "$(ls -A opwb-web/target/dependencies)" ]; then
+                            ls -1 opwb-web/target/dependencies/ > ${CURRENT_DEPS_FILE}
                         else
-                            # 查找新增和变更的依赖
-                            diff -qr previous_build/dependencies opwb-web/target/dependencies | while read -r line; do
-                                if [[ $line == *"Files"* && $line == *"differ"* ]]; then
-                                    FILE_PATH=$(echo "$line" | sed -n 's/.* and \\(.*\\) differ/\\1/p')
-                                    RELATIVE_PATH=$(basename "$FILE_PATH")
-                                    echo "  -> CHANGE: Dependency '$RELATIVE_PATH' will be packaged."
-                                    cp "$FILE_PATH" "update_package/dependencies/$RELATIVE_PATH"
-                                elif [[ $line == "Only in"* ]]; then
-                                    FILE_PATH=$(echo "$line" | sed -n 's/Only in \\(.[^:]*\\): \\(..*\\)/\\1\\/\\2/p')
-                                    RELATIVE_PATH=$(basename "$FILE_PATH")
-                                    echo "  -> NEW: Dependency '$RELATIVE_PATH' will be packaged."
-                                    cp "$FILE_PATH" "update_package/dependencies/$RELATIVE_PATH"
-                                fi
-                            done
-
-                            # 查找被删除的依赖
-                            diff -qr opwb-web/target/dependencies previous_build/dependencies | while read -r line; do
-                                if [[ $line == "Only in"* ]]; then
-                                    FILE_PATH=$(echo "$line" | sed -n 's/Only in \\(.[^:]*\\): \\(..*\\)/\\1\\/\\2/p')
-                                    RELATIVE_PATH=$(basename "$FILE_PATH")
-                                    echo "  -> DELETED: Dependency '$RELATIVE_PATH' will be added to delete.txt."
-                                    echo "dependencies/$RELATIVE_PATH" >> $DELETE_MANIFEST
-                                fi
-                            done
+                            touch ${CURRENT_DEPS_FILE}
                         fi
 
-                        # 5. 根据是否有变更来决定是否打包
-                        echo "INFO: [3/3] Finalizing package..."
-                        # 如果删除清单为空, 则删掉它
+                        sort "${MANIFEST_FILE}" -o manifest.sorted.txt
+                        sort "${CURRENT_DEPS_FILE}" -o current_deps.sorted.txt
+
+                        comm -23 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r filename; do
+                            if [ -n "$filename" ]; then
+                                echo "  -> 新增: 依赖 '$filename' 不在清单中，打包中。"
+                                cp "opwb-web/target/dependencies/$filename" "update_package/lib/$filename"
+                            fi
+                        done
+
+                        comm -13 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r filename; do
+                            if [ -n "$filename" ]; then
+                                echo "  -> 删除: 依赖 '$filename' 将被添加到 delete.txt。"
+                                echo "lib/$filename" >> $DELETE_MANIFEST
+                            fi
+                        done
+                        rm -f current_deps.txt manifest.sorted.txt current_deps.sorted.txt
+
+                        # 6. 根据是否有变更来决定是否打包
+                        echo "INFO: [3/3] 正在完成打包..."
                         if [ -f "$DELETE_MANIFEST" ] && [ ! -s "$DELETE_MANIFEST" ]; then
                             rm $DELETE_MANIFEST
                         fi
 
                         if [ -z "$(ls -A update_package)" ]; then
                             echo "-------------------------------------------------------------"
-                            echo "SUMMARY: NO CHANGES DETECTED. No update package is needed."
+                            echo "总结: 未检测到任何变更，无需创建更新包。"
                             echo "-------------------------------------------------------------"
                             echo "NO_CHANGES_DETECTED=true" > build_vars.properties
                         else
                             echo "-------------------------------------------------------------"
-                            echo "SUMMARY: Changes detected. Creating update package..."
+                            echo "总结: 检测到变更，正在创建更新包..."
                             echo "-------------------------------------------------------------"
                             echo "NO_CHANGES_DETECTED=false" > build_vars.properties
                             cd update_package
                             tar -czf ../update.tar.gz .
                             cd ..
-                            echo "SUCCESS: Update package created as update.tar.gz."
+                            echo "SUCCESS: 更新包 update.tar.gz 已创建。"
                         fi
+
+                        # 7. 保存业务 Jar 包基线
+                        echo "INFO: 正在为下次构建更新业务 Jar 包基线..."
+                        mkdir -p "${BASELINE_PATH}"
+                        for module_name in ${SELF_MODULES}; do
+                            MODULE_JAR_NEW=""
+                            CANDIDATE=$(find "${module_name}/target" -maxdepth 1 -name "*.jar.original" 2>/dev/null)
+                            if [ -z "${CANDIDATE}" ]; then
+                                CANDIDATE=$(find "${module_name}/target" -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" ! -name "*-exec.jar" 2>/dev/null)
+                            fi
+                            MODULE_JAR_NEW=$(echo "${CANDIDATE}" | head -n 1)
+
+                            if [ -n "${MODULE_JAR_NEW}" ]; then
+                                # 使用固定名称保存基线，方便下次查找
+                                cp "${MODULE_JAR_NEW}" "${BASELINE_PATH}/${module_name}.jar"
+                            fi
+                        done
+                        echo "SUCCESS: 业务 Jar 包基线已更新。"
                     '''
                     // 读取shell脚本生成的标记
                     def props = readProperties file: 'build_vars.properties'
@@ -203,36 +262,10 @@ EOF
     //  构建后操作
     // ====================================================================
     post {
-        success {
-            echo 'INFO: Build successful. Updating the full baseline for next build...'
-            script {
-                def shareRoot = "/var/jenkins_home/share"
-                def baselinePath = "${shareRoot}/${env.JOB_NAME}/last_successful_artifacts"
-                sh """
-                    set -e
-                    BASELINE_PATH="${baselinePath}"
-                    echo "INFO: Updating full baseline at \${BASELINE_PATH}"
-                    rm -rf "\${BASELINE_PATH}"
-                    mkdir -p "\${BASELINE_PATH}/dependencies"
-
-                    # 1. 复制 opwb-web 的依赖库
-                    cp -a opwb-web/target/dependencies/. "\${BASELINE_PATH}/dependencies/"
-
-                    # 2. 复制 opwb-terminal.jar
-                    TERMINAL_JAR=\$(find opwb-terminal/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar")
-                    if [ -n "\$TERMINAL_JAR" ]; then cp "\$TERMINAL_JAR" "\${BASELINE_PATH}/opwb-terminal.jar"; fi
-
-                    # 3. 复制 opwb-web.jar (瘦包)
-                    WEB_JAR=\$(find opwb-web/target -maxdepth 1 -name "*.jar.original")
-                    if [ -z "\$WEB_JAR" ]; then WEB_JAR=\$(find opwb-web/target -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar"); fi
-                    if [ -n "\$WEB_JAR" ]; then cp "\$WEB_JAR" "\${BASELINE_PATH}/opwb-web.jar"; fi
-
-                    echo "SUCCESS: Full baseline updated."
-                """
-            }
-        }
         always {
             echo '构建流程结束。'
+            cleanWs()
         }
     }
 }
+
