@@ -1,6 +1,6 @@
 # ====================================================================
 #  第一阶段：工具准备阶段 (tools_builder)
-#  目标：只获取 zip 和 time 命令。
+#  目标：只获取 zip 命令
 # ====================================================================
 FROM debian:bullseye-slim as tools_builder
 
@@ -8,7 +8,7 @@ FROM debian:bullseye-slim as tools_builder
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends zip time && \
+    apt-get install -y --no-install-recommends zip && \
     rm -rf /var/lib/apt/lists/*
 
 # ====================================================================
@@ -19,7 +19,6 @@ FROM node:14.15.0
 
 # 从第一阶段复制 zip 和 time 工具到最终的 Node.js 镜像中
 COPY --from=tools_builder /usr/bin/zip /usr/bin/zip
-COPY --from=tools_builder /usr/bin/time /usr/bin/time
 
-# 设置默认工作目录，这是一个好习惯
+# 设置默认工作目录
 WORKDIR /app
