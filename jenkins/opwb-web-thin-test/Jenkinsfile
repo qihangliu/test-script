@@ -14,7 +14,7 @@ pipeline {
         stage('Clean Workspace') {
             steps {
                 echo 'INFO: 使用 root 权限在容器内清理工作空间...'
-                sh 'git config --global --add safe.directory /var/jenkins_home/workspace/opwb-web || true'
+                sh 'git config --global --add safe.directory /var/jenkins_home/workspace/opwb-web-thin-test || true'
                 sh 'git clean -fdx || true'
             }
         }
@@ -43,8 +43,9 @@ pipeline {
             steps {
                 configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
                     script {
-                        echo 'INFO: [1/4] 开始执行 Maven 构建...'
-                        sh 'mvn -s ${MAVEN_SETTINGS} -T 8 clean package -Dproject.build.outputTimestamp=1 -DskipTests'
+                        echo 'INFO: [1/4] 开始执行 Maven 构建 (已排除 opwb-terminal)...'
+                        // 【修改点 1】使用 -pl '!opwb-terminal' 来排除该模块的构建
+                        sh 'mvn -s ${MAVEN_SETTINGS} -T 8 clean package -pl \'!opwb-terminal\' -Dproject.build.outputTimestamp=1 -DskipTests -Dspring-boot.repackage.layout=ZIP -Dspring-boot.repackage.includes=non-exists:non-exists'
 
                         echo 'INFO: [2/4] 开始为 opwb-web 模块分离依赖库...'
                         sh 'mvn -s ${MAVEN_SETTINGS} -T 8 -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
@@ -76,14 +77,14 @@ pipeline {
                             RAW_MANIFEST_RESPONSE=$(curl --connect-timeout 10 -s "http://10.189.189.189:8084/automation/getLibJarList/?path=/data/server/opwbworkbench/thin_deploy/lib/" --header "Authorization: Bearer $TOKEN")
                             echo "  -> API 原始响应: ${RAW_MANIFEST_RESPONSE}"
 
-                            # [最终修正] 解析服务器清单，并过滤掉所有 opwb-* 开头的业务模块
                             echo "${RAW_MANIFEST_RESPONSE}" | jq -r '.result[]' | grep -v '^opwb-' > ${MANIFEST_FILE}
 
                             if [ ! -s "${MANIFEST_FILE}" ]; then
                                 echo "⚠️ 警告: 从 API 获取的清单为空或解析失败，依赖部分将按全量处理。"
                             fi
 
-                            SELF_MODULES="opwb-terminal opwb-web opwb-dao opwb-bean opwb-service opwb-flow opwb-framework-core opwb-framework-entity opwb-framework-definition"
+                            # 从需要检查和打包的模块列表中移除 opwb-terminal
+                            SELF_MODULES="opwb-web opwb-dao opwb-bean opwb-service opwb-flow opwb-framework-core opwb-framework-entity opwb-framework-definition"
 
                             echo "  -> 正在打包有变更的业务模块 (对比基线)..."
                             for module_name in ${SELF_MODULES}; do
@@ -123,7 +124,9 @@ pipeline {
                             ls -1 opwb-web/target/dependencies/ > ${CURRENT_DEPS_FILE}
                             sort "${MANIFEST_FILE}" -o manifest.sorted.txt
                             sort "${CURRENT_DEPS_FILE}" -o current_deps.sorted.txt
-                            comm -23 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ]; then cp "opwb-web/target/dependencies/$f" "update_package/lib/$f"; fi; done
+                            comm -23 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ] && [[ ! "$f" == opwb-*.jar ]]; then cp "opwb-web/target/dependencies/$f" "update_package/lib/$f"; fi; done
+                            comm -13 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ]; then echo "lib/$f" >> $DELETE_MANIFEST; fi; done
+                            if [ ! -s "$DELETE_MANIFEST" ]; then rm $DELETE_MANIFEST; fi
                             comm -13 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ]; then echo "lib/$f" >> $DELETE_MANIFEST; fi; done
                             if [ ! -s "$DELETE_MANIFEST" ]; then rm $DELETE_MANIFEST; fi
 
