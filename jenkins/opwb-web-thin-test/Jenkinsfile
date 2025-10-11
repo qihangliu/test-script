@@ -44,7 +44,7 @@ pipeline {
                 configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
                     script {
                         echo 'INFO: [1/4] 开始执行 Maven 构建 (已排除 opwb-terminal)...'
-                        // 【修改点 1】使用 -pl '!opwb-terminal' 来排除该模块的构建
+                        // 使用 -pl '!opwb-terminal' 来排除该模块的构建
                         sh 'mvn -s ${MAVEN_SETTINGS} -T 8 clean package -pl \'!opwb-terminal\' -Dproject.build.outputTimestamp=1 -DskipTests -Dspring-boot.repackage.layout=ZIP -Dspring-boot.repackage.includes=non-exists:non-exists'
 
                         echo 'INFO: [2/4] 开始为 opwb-web 模块分离依赖库...'
@@ -125,8 +125,6 @@ pipeline {
                             sort "${MANIFEST_FILE}" -o manifest.sorted.txt
                             sort "${CURRENT_DEPS_FILE}" -o current_deps.sorted.txt
                             comm -23 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ] && [[ ! "$f" == opwb-*.jar ]]; then cp "opwb-web/target/dependencies/$f" "update_package/lib/$f"; fi; done
-                            comm -13 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ]; then echo "lib/$f" >> $DELETE_MANIFEST; fi; done
-                            if [ ! -s "$DELETE_MANIFEST" ]; then rm $DELETE_MANIFEST; fi
                             comm -13 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ]; then echo "lib/$f" >> $DELETE_MANIFEST; fi; done
                             if [ ! -s "$DELETE_MANIFEST" ]; then rm $DELETE_MANIFEST; fi
 
@@ -216,7 +214,22 @@ else
     echo "目录 \${THIN_APP_DIR} 为空或不存在，跳过备份。"
 fi
 
+echo "  -> 正在清理旧的备份 (仅保留最近的 10 个)..."
+(cd "\${BACKUP_DIR}" && {
+    NUM_TO_KEEP=10
+    COUNT=\$(ls -1 thin_app_backup_*.tar.gz 2>/dev/null | wc -l)
+    if [ "\$COUNT" -gt "\$NUM_TO_KEEP" ]; then
+        NUM_TO_DELETE=\$((COUNT - NUM_TO_KEEP))
+        echo "    -> 发现 \${COUNT} 个备份, 将删除最旧的 \${NUM_TO_DELETE} 个。"
+        ls -1 thin_app_backup_*.tar.gz | head -n "\${NUM_TO_DELETE}" | xargs -d '\n' rm -f
+    else
+        echo "    -> 备份数量 (\${COUNT}) 未超过 \${NUM_TO_KEEP}，无需清理。"
+    fi
+})
+
 echo "[3/4] 正在应用更新到 \${THIN_APP_DIR}..."
+echo "清理 lib/ 目录中可能残留的旧版业务模块..."
+rm -f "\${THIN_APP_DIR}/lib/opwb-*.jar"
 tar -xzf "\${TEMP_DIR}/\${PACKAGE_NAME}" -C "\${THIN_APP_DIR}/"
 DELETE_FILE="\${THIN_APP_DIR}/delete.txt"
 if [ -f "\$DELETE_FILE" ]; then
