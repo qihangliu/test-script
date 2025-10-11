@@ -1,0 +1,288 @@
+pipeline {
+    // 1. 定义构建环境
+    agent {
+        docker {
+            image 'maven:3.9.11-eclipse-temurin-21'
+            args '-u root:root -v maven-m2-cache:/root/.m2/repository'
+        }
+    }
+
+    stages {
+        // ====================================================================
+        //  阶段 0: 清理工作空间
+        // ====================================================================
+        stage('Clean Workspace') {
+            steps {
+                echo 'INFO: 使用 root 权限在容器内清理工作空间...'
+                sh 'git config --global --add safe.directory /var/jenkins_home/workspace/opwb-web-thin-prod || true'
+                sh 'git clean -fdx || true'
+            }
+        }
+
+        // ====================================================================
+        //  阶段 1: 拉取代码
+        // ====================================================================
+        stage('Checkout') {
+            steps {
+                echo 'INFO: 开始从 Git 仓库拉取代码...'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/workbench']],
+                    userRemoteConfigs: [[
+                        url: 'https://gitee.com/changyunhuizhi/opwb-services.git',
+                        credentialsId: 'd5208b73-a80f-403b-a5df-365614d1362e'
+                    ]]
+                ])
+            }
+        }
+
+        // ====================================================================
+        //  阶段 2: 构建并创建增量包 (智能差异打包)
+        // ====================================================================
+        stage('Build and Create Package') {
+            steps {
+                configFileProvider([configFile(fileId: 'maven-aliyun-settings', variable: 'MAVEN_SETTINGS')]) {
+                    script {
+                        echo 'INFO: [1/4] 开始执行 Maven 构建 (已排除 opwb-terminal)...'
+                        sh 'mvn -s ${MAVEN_SETTINGS} -T 8 clean package -pl \'!opwb-terminal\' -Dproject.build.outputTimestamp=1 -DskipTests -Dspring-boot.repackage.layout=ZIP -Dspring-boot.repackage.includes=non-exists:non-exists'
+
+                        echo 'INFO: [2/4] 开始为 opwb-web 模块分离依赖库...'
+                        sh 'mvn -s ${MAVEN_SETTINGS} -T 8 -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
+
+                        echo 'INFO: [3/4] 开始根据差异创建增量包...'
+                        sh '''
+                            #!/bin/bash
+                            set -e
+                            mkdir -p update_package/lib
+                            MANIFEST_FILE="dependency-manifest.txt"
+                            BASELINE_PATH="/var/jenkins_home/share/${JOB_NAME}/last_successful_artifacts"
+                            mkdir -p "${BASELINE_PATH}"
+
+                            echo "  -> 正在登录服务器获取 Token (IP: 10.189.189.247)..."
+                            JSON_PAYLOAD='{"password": "2T1C2]]k^T9]Kjl", "type": "account"}'
+                            LOGIN_RESPONSE=$(curl -s --location --request POST 'http://10.189.189.247:8083/wt/api/terminalAuth/login' \
+                                --header 'Content-Type: application/json' \
+                                --data-raw "${JSON_PAYLOAD}")
+                            TOKEN=$(echo "${LOGIN_RESPONSE}" | jq -r '.token')
+
+                            if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+                                echo "❌ 错误: 获取 Token 失败！"
+                                echo "   登录响应: ${LOGIN_RESPONSE}"
+                                exit 1
+                            fi
+                            echo "  -> ✅ 成功获取 Token。"
+                            # 将 Token 写入属性文件，以便后续阶段使用
+                            echo "API_TOKEN=${TOKEN}" > token.properties
+
+                            echo "  -> 正在使用 Token 获取服务器依赖清单 (IP: 10.189.189.247)..."
+                            RAW_MANIFEST_RESPONSE=$(curl --connect-timeout 10 -s "http://10.189.189.247:8084/automation/getLibJarList/?path=/data/server/opwbworkbench/thin_deploy/lib/" --header "Authorization: Bearer $TOKEN")
+                            echo "  -> API 原始响应: ${RAW_MANIFEST_RESPONSE}"
+
+                            echo "${RAW_MANIFEST_RESPONSE}" | jq -r '.result[]' | grep -v '^opwb-' > ${MANIFEST_FILE}
+
+                            if [ ! -s "${MANIFEST_FILE}" ]; then
+                                echo "⚠️ 警告: 从 API 获取的清单为空或解析失败，依赖部分将按全量处理。"
+                            fi
+
+                            SELF_MODULES="opwb-web opwb-dao opwb-bean opwb-service opwb-flow opwb-framework-core opwb-framework-entity opwb-framework-definition"
+
+                            echo "  -> 正在打包有变更的业务模块 (对比基线)..."
+                            for module_name in ${SELF_MODULES}; do
+                                MODULE_JAR_NEW=""
+                                TARGET_JAR_NAME_IN_PACKAGE=""
+
+                                if [ "$module_name" = "opwb-web" ]; then
+                                    MODULE_JAR_NEW=$(find "opwb-web/target" -maxdepth 1 -name "*.jar.original" 2>/dev/null | head -n 1)
+                                    if [ -n "$MODULE_JAR_NEW" ]; then
+                                        TARGET_JAR_NAME_IN_PACKAGE="$(basename ${MODULE_JAR_NEW} .original)"
+                                    fi
+                                else
+                                    MODULE_JAR_NEW=$(find "${module_name}/target" -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" ! -name "*-exec.jar" 2>/dev/null | head -n 1)
+                                    if [ -n "$MODULE_JAR_NEW" ]; then
+                                        TARGET_JAR_NAME_IN_PACKAGE="$(basename ${MODULE_JAR_NEW})"
+                                    fi
+                                fi
+
+                                if [ -n "$MODULE_JAR_NEW" ]; then
+                                    MODULE_JAR_OLD="${BASELINE_PATH}/${TARGET_JAR_NAME_IN_PACKAGE}"
+                                    if [ ! -f "$MODULE_JAR_OLD" ] || ! cmp -s "$MODULE_JAR_OLD" "$MODULE_JAR_NEW"; then
+                                        echo "    -> 变更: ${TARGET_JAR_NAME_IN_PACKAGE}"
+                                        cp "$MODULE_JAR_NEW" "update_package/${TARGET_JAR_NAME_IN_PACKAGE}"
+                                    fi
+                                fi
+                            done
+
+                            echo "  -> 正在清理依赖目录中的重复业务模块..."
+                            for module in ${SELF_MODULES}; do
+                                rm -f opwb-web/target/dependencies/${module}-*.jar
+                            done
+
+                            echo "  -> 正在计算依赖差异..."
+                            DELETE_MANIFEST="update_package/delete.txt"
+                            touch $DELETE_MANIFEST
+                            CURRENT_DEPS_FILE="current_deps.txt"
+                            ls -1 opwb-web/target/dependencies/ > ${CURRENT_DEPS_FILE}
+                            sort "${MANIFEST_FILE}" -o manifest.sorted.txt
+                            sort "${CURRENT_DEPS_FILE}" -o current_deps.sorted.txt
+                            comm -23 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ] && [[ ! "$f" == opwb-*.jar ]]; then cp "opwb-web/target/dependencies/$f" "update_package/lib/$f"; fi; done
+                            comm -13 current_deps.sorted.txt manifest.sorted.txt | while IFS= read -r f; do if [ -n "$f" ]; then echo "lib/$f" >> $DELETE_MANIFEST; fi; done
+                            if [ ! -s "$DELETE_MANIFEST" ]; then rm $DELETE_MANIFEST; fi
+
+                            if [ -z "$(ls -A update_package)" ]; then
+                                echo "NO_CHANGES_DETECTED=true" > build_vars.properties;
+                            else
+                                echo "NO_CHANGES_DETECTED=false" > build_vars.properties
+                                echo "  -> 正在压缩增量包..."
+                                cd update_package; tar -czf ../update.tar.gz .; cd ..;
+                            fi
+
+                            echo "  -> 正在更新基线版本..."
+                             for module_name in ${SELF_MODULES}; do
+                                MODULE_JAR_NEW=""
+                                TARGET_JAR_NAME_IN_PACKAGE=""
+                                if [ "$module_name" = "opwb-web" ]; then
+                                    MODULE_JAR_NEW=$(find "opwb-web/target" -maxdepth 1 -name "*.jar.original" 2>/dev/null | head -n 1)
+                                    if [ -n "$MODULE_JAR_NEW" ]; then
+                                        TARGET_JAR_NAME_IN_PACKAGE="$(basename ${MODULE_JAR_NEW} .original)"
+                                    fi
+                                else
+                                    MODULE_JAR_NEW=$(find "${module_name}/target" -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" ! -name "*-exec.jar" 2>/dev/null | head -n 1)
+                                    if [ -n "$MODULE_JAR_NEW" ]; then
+                                        TARGET_JAR_NAME_IN_PACKAGE="$(basename ${MODULE_JAR_NEW})"
+                                    fi
+                                fi
+                                if [ -n "$MODULE_JAR_NEW" ]; then
+                                    cp "$MODULE_JAR_NEW" "${BASELINE_PATH}/${TARGET_JAR_NAME_IN_PACKAGE}"
+                                fi
+                            done
+                        '''
+                        def buildProps = readProperties file: 'build_vars.properties'
+                        env.NO_CHANGES_DETECTED = buildProps.NO_CHANGES_DETECTED
+
+                        def tokenProps = readProperties file: 'token.properties'
+                        env.API_TOKEN = tokenProps.API_TOKEN
+                    }
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 4: 部署到正式环境 (通过 API)
+        // ====================================================================
+        stage('Deploy to Production Environment') {
+            when { expression { env.NO_CHANGES_DETECTED == 'false' } }
+            steps {
+                script {
+                    echo "INFO: [1/4] 正在通过 API 上传增量包到 /tmp/ ..."
+                    sh """
+                        set -e
+                        RESPONSE_CODE=\$(curl -s -o /dev/stderr -w "%{http_code}" -X POST "http://10.189.189.247:8084/automation/uploadFile" \
+                            -H "Authorization: Bearer ${API_TOKEN}" \
+                            -F "file=@update.tar.gz" \
+                            -F "path=/tmp/"
+                        if [ "\$RESPONSE_CODE" -ne 200 ]; then
+                            echo "❌ 错误: 文件上传失败, HTTP 状态码: \$RESPONSE_CODE"
+                            exit 1
+                        fi
+                        echo "  -> ✅ 文件上传成功。"
+                    """
+
+                    echo "INFO: [2/4] 正在通过 API 删除远程服务器上的旧文件..."
+                    sh '''
+                        #!/bin/bash
+                        set -e
+                        if [ ! -f "update.tar.gz" ]; then
+                            echo "INFO: 未发现 update.tar.gz, 跳过此阶段。"
+                            exit 0
+                        fi
+
+                        # 解压到临时目录以读取 delete.txt
+                        mkdir -p temp_update
+                        tar -xzf update.tar.gz -C temp_update
+                        
+                        DELETE_FILE="temp_update/delete.txt"
+
+                        if [ -f "$DELETE_FILE" ]; then
+                            echo "  -> 发现 delete.txt, 开始处理文件删除..."
+                            REMOTE_APP_DIR="/data/server/opwbworkbench/thin_deploy"
+                            
+                            # 修正换行符
+                            sed -i 's/\r$//' $DELETE_FILE
+
+                            while IFS= read -r line || [[ -n "$line" ]]; do
+                                # 忽略空行
+                                if [ -z "$line" ]; then continue; fi
+                                
+                                # 构造远程路径
+                                remote_file_path="${REMOTE_APP_DIR}/${line}"
+                                
+                                echo "    -> 准备删除: ${remote_file_path}"
+                                
+                                RESPONSE_CODE=$(curl -s -o /dev/stderr -w "% {http_code}" -X POST "http://10.189.189.247:8084/automation/deletePath" \
+                                    -H "Authorization: Bearer ${API_TOKEN}" \
+                                    -H "Content-Type: application/json" \
+                                    -d "{\"path\": \"${remote_file_path}\"}")
+
+                                if [ "$RESPONSE_CODE" -ne 200 ]; then
+                                    echo "    -> ⚠️ 警告: 删除文件 '${remote_file_path}' 失败, HTTP 状态码: $RESPONSE_CODE"
+                                    # 根据策略决定是否退出
+                                    # exit 1
+                                else
+                                    echo "    -> ✅ 删除成功"
+                                fi
+                            done < "$DELETE_FILE"
+                        else
+                            echo "  -> 未发现 delete.txt, 无需删除文件。"
+                        fi
+                        rm -rf temp_update
+                    '''
+
+                    echo "INFO: [3/4] 正在应用更新..."
+                    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                    echo "!!  警告: 缺少远程解压 API                                                   !!"
+                    echo "!!----------------------------------------------------------------------------!!"
+                    echo "!!  需要一个 API 接口来执行以下操作:                                           !!"
+                    echo "!!  1. (可选) 备份现有应用                                                     !!"
+                    echo "!!  2. 解压 /tmp/update.tar.gz 到 /data/server/opwbworkbench/thin_deploy/      !!"
+                    echo "!!  此步骤已被跳过。请手动实现或添加相应的 API 接口。                          !!"
+                    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                    
+                    echo "INFO: [4/4] 正在通过 API 重启服务..."
+                    sh """
+                        set -e
+                        RESTART_URL="http://10.189.189.247:8084/automation/restart-service?scriptPath=/data/server/terminal/opwb-terminal.sh&arg=start"
+                        echo "  -> 调用重启接口: ${RESTART_URL}"
+                        RESPONSE_CODE=\$(curl -s -o /dev/stderr -w "%{http_code}" -X GET "\$RESTART_URL" \
+                            -H "Authorization: Bearer ${API_TOKEN}")
+                        
+                        if [ "\$RESPONSE_CODE" -ne 200 ]; then
+                            echo "❌ 错误: 重启服务失败, HTTP 状态码: \$RESPONSE_CODE"
+                            exit 1
+                        fi
+                        echo "  -> ✅ 重启命令已发送。"
+                    """
+                }
+            }
+        }
+
+        // ====================================================================
+        //  阶段 5: 归档
+        // ====================================================================
+        stage('Archive') {
+            when { expression { env.NO_CHANGES_DETECTED == 'false' } }
+            steps {
+                echo 'INFO: 开始归档增量包至 Jenkins...'
+                archiveArtifacts artifacts: 'update.tar.gz', allowEmptyArchive: true
+            }
+        }
+    }
+
+    // ====================================================================
+    //  构建后操作
+    // ====================================================================
+    post {
+        always {
+            echo '构建流程结束。'
+        }
+    }
+}
