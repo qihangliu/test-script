@@ -11,6 +11,7 @@ pipeline {
         IMAGE_NAME = 'testenv'
         // 定义默认的稳定镜像版本，当Dockerfile未更新时使用
         STABLE_IMAGE_TAG = 'baseline'
+        // DYNAMIC_IMAGE_TAG 从这里移除，因为它将在后面动态生成
     }
 
     // 定义流水线选项
@@ -32,7 +33,10 @@ pipeline {
         stage('Clean Workspace') {
             steps {
                 echo "INFO: 准备为构建 #${env.BUILD_NUMBER} 清理工作区..."
-                cleanWs()
+                // 使用 'git clean' 代替 'cleanWs'。
+                // 'git clean -fdx' 会删除所有未跟踪的文件和目录，包括被 .gitignore 忽略的文件，
+                // 但会保留 .git 目录，从而保留了 git 历史，使得 Jenkins 能够正确计算增量变更。
+                sh 'git clean -fdx'
                 echo "SUCCESS: 工作区清理完成."
             }
         }
@@ -45,11 +49,11 @@ pipeline {
                 script {
                     // 定义Git仓库和分支的变量
                     def gitUrl = 'https://gitee.com/changyunhuizhi/opwb-automation.git'
-                    def gitBranch = 'main'
+                    def gitBranch = env.BRANCH_NAME ?: 'main'
 
                     // 使用变量生成动态的日志消息
                     echo "INFO: 开始从 Gitee 仓库 [${gitUrl}] 检出代码 (分支: ${gitBranch})..."
-                    
+
                     retry(count: 3) {
                         // 在 git 步骤中使用变量
                         git branch: gitBranch,
@@ -73,27 +77,37 @@ pipeline {
                     DYNAMIC_IMAGE_TAG = "${buildDate}-${env.BUILD_NUMBER}"
                     echo "INFO: 本次构建生成的动态镜像标签为: ${env.IMAGE_NAME}:${DYNAMIC_IMAGE_TAG}"
 
-                    // 检查自上次成功构建以来的文件变动
-                    echo "INFO: 检查自上次成功构建以来的文件变动..."
-                    def changedFiles = ''
-                    // 使用更健壮的逻辑：如果GIT_PREVIOUS_SUCCESSFUL_COMMIT存在，则进行比较；否则，使用当前提交与其父提交进行比较。
-                    if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
-                        echo "INFO: 对比当前 commit (${env.GIT_COMMIT}) 与上次成功 commit (${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT})..."
-                        changedFiles = sh(returnStdout: true, script: "git diff --name-only ${env.GIT_PREVIOUS_SUCCESSFUL_COMMIT} ${env.GIT_COMMIT}").trim()
-                    } else {
-                        // 如果是第一次构建或上次构建失败，则检查当前提交与它的父提交之间的变动。
-                        echo "WARNING: 未找到上次成功构建的 commit ID，将使用 'HEAD' 与其父提交进行文件变动对比。"
-                        try {
-                            changedFiles = sh(returnStdout: true, script: "git diff --name-only HEAD^ HEAD").trim()
-                        } catch (e) {
-                            // 如果是仓库的第一次提交，'HEAD^' 会失败，此时假定有变动
-                            echo "WARNING: git diff HEAD^ HEAD 失败，可能为第一次提交，将默认认为 Dockerfile 已变动。"
-                            changedFiles = 'Dockerfile'
+                    echo "INFO: 检查本次构建的变更集以确定 Dockerfile 是否变动..."
+                    // 如果是第一次构建，changeSets 可能为空，此时默认不构建镜像
+                    // 只有当明确检测到 Dockerfile 变动时才构建
+                    def dockerfileHasChanged = false
+                    if (!currentBuild.changeSets.isEmpty()) {
+                        // 遍历所有变更集
+                        for (changeSet in currentBuild.changeSets) {
+                            // 遍历变更集中的每个条目（通常是每个 commit）
+                            for (entry in changeSet.items) {
+                                // 检查受影响的文件路径
+                                if (entry.affectedPaths.any { it.contains('Dockerfile') }) {
+                                    dockerfileHasChanged = true
+                                    // 找到一个变动就足够了，可以跳出循环
+                                    break
+                                }
+                            }
+                            if (dockerfileHasChanged) {
+                                break
+                            }
                         }
+                    } else {
+                        echo "WARNING: 本次构建变更集为空，可能为手动触发或首次构建。将假定 Dockerfile 未变动。"
                     }
 
-                    echo "INFO: 本次构建涉及的变动文件:\n${changedFiles}"
-                    env.DOCKERFILE_CHANGED = changedFiles.contains('Dockerfile') ? 'true' : 'false'
+                    if (dockerfileHasChanged) {
+                        echo "INFO: 检测到 Dockerfile 在本次构建的变更中被修改。"
+                        env.DOCKERFILE_CHANGED = 'true'
+                    } else {
+                        echo "INFO: 本次构建的变更集中不包含对 Dockerfile 的修改。"
+                        env.DOCKERFILE_CHANGED = 'false'
+                    }
                     echo "INFO: Dockerfile 是否发生变动: ${env.DOCKERFILE_CHANGED}"
                 }
             }
@@ -129,7 +143,7 @@ pipeline {
         }
 
         // ====================================================================
-        //  阶段 5: 运行 API 自动化测试 (动态选择镜像)
+        //  阶段 5: 运行 API 自动化测试
         // ====================================================================
         stage('Run API Tests') {
             steps {
@@ -167,7 +181,7 @@ pipeline {
                 // 1. 首先，无论成功与否都尝试生成 Allure 报告
                 // 这样即使测试失败，也能看到失败的报告
                 try {
-                    allure commandline: 'Allure', includeProperties: false, jdk: '', report: 'output/report/allure-report', results: [[path: 'output/report/allure-results']]
+                    allure commandline: 'Allure', includeProperties: false, jdk: '', results: [[path: 'output/report/allure-results']]
                 } catch (e) {
                     echo "WARNING: Allure 报告生成失败: ${e.message}"
                 }
