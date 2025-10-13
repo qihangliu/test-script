@@ -1,9 +1,12 @@
-#!/system/bin/sh
+ #!/system/bin/sh
+
+# 检查输入参数是否合法，至少需要一个目录参数
 if [ $# -lt 1 ]; then
         echo Usage: $0 {dir} [loop count] > /dev/console
         #exit 0
 fi
 
+# 获取系统启动完成状态属性
 COM=`getprop "sys.boot_completed"`
 echo "rw completed_va 123 :${COM}  ....." > /dev/console
 if [ $COM ='' ]; then
@@ -12,6 +15,7 @@ fi
 
 echo "rw completed_va:${COM}  ....." > /dev/console
 
+# 等待系统启动完成，直到sys.boot_completed属性值为1
 while [ $COM -ne 1 ]; do
 	sleep 1
 	COM=`getprop "sys.boot_completed"`
@@ -20,8 +24,9 @@ while [ $COM -ne 1 ]; do
 		COM=0
 	fi
 done
-	
 
+
+# 设置测试目录和循环次数
 DIR=/data
 if [ $# -eq 2 ]; then
         LOOP_COUNT=$2
@@ -30,11 +35,17 @@ else
 fi
 echo "------------Loop count: ${LOOP_COUNT}--------------" > /dev/console
 
+# 检查测试目录是否存在
 if [ ! -d ${DIR} ]; then
         echo Directory \"${DIR}\" not exists. > /dev/console
         exit 1
 fi
 
+# 固定模式测试函数
+# 参数:
+#   $1 - 测试模式字符串，如"\x5A\x5A\x5A\x5A"
+#   $2 - 当前循环索引
+# 返回值: 无
 fix_pattern_test()
 {
         local ix=4
@@ -51,6 +62,8 @@ fix_pattern_test()
                 echo "ERROR: Create base tmp.bin" > /dev/console
                 exit 1
         fi
+
+        # 通过不断复制合并文件来创建指定大小的测试文件
         while [ true ]; do
                 cp ${DIR}/tmp.bin ${DIR}/tmp1.bin 1> /dev/console 2>&1
         if [ "$?" != "0" ]; then
@@ -92,6 +105,8 @@ fix_pattern_test()
         echo "" > /dev/console
         sync
         echo 1 >/proc/sys/vm/drop_caches
+
+        # 复制测试文件并进行比较验证
         echo Copy pattern file $BASE_FILE ... > /dev/console
         cp ${DIR}/${BASE_FILE} ${DIR}/${BASE_FILE}_copy.bin 1> /dev/console 2>&1
         if [ "$?" != "0" ]; then
@@ -116,6 +131,9 @@ fix_pattern_test()
         fi
 }
 
+# 随机模式测试函数
+# 参数: 无
+# 返回值: 无
 random_patten_test()
 {
         local BLOCK_SIZE=1048676
@@ -129,6 +147,8 @@ random_patten_test()
         echo " " > /dev/console
         sync
         echo 1 >/proc/sys/vm/drop_caches
+
+        # 创建随机数据文件并进行复制比较测试
         echo "Copy urandom file urandom$ix.bin ..." > /dev/console
         cp ${DIR}/urandom$ix.bin ${DIR}/urandom_copy.bin 1> /dev/console 2>&1
         if [ "$?" != "0" ];then
@@ -153,10 +173,12 @@ random_patten_test()
                 exit 1
         fi
 }
+
 echo ******** start ******** > /dev/console
 
 ix=0
 
+# 主测试循环，根据设定的循环次数执行测试
 while [ true ] ; do
         echo ============== loop: $ix ============== > /dev/console
 
@@ -165,6 +187,7 @@ while [ true ] ; do
         echo $count >/dev/console
         echo -en "$count" >${DIR}/count.txt
 
+        # 执行各种固定模式测试（当前被注释掉）
         # fix_pattern_test "\x5A\x5A\x5A\x5A" $ix
         # fix_pattern_test "\xA5\xA5\xA5\xA5" $ix
         # fix_pattern_test "\x00\xFF\x00\xFF" $ix
@@ -177,9 +200,13 @@ while [ true ] ; do
         # fix_pattern_test "\x20\x20\x20\x20" $ix
         # fix_pattern_test "\x40\x40\x40\x40" $ix
         # fix_pattern_test "\x80\x80\x80\x80" $ix
+
+        # 执行随机模式测试
         random_patten_test
 
         ix=$(($ix + 1));
+
+        # 达到设定循环次数后重置计数器并清理测试文件
         if [ $ix -ge $LOOP_COUNT ]; then
                 ix=0
                 echo "Remove all test files ..." > /dev/console
@@ -187,4 +214,3 @@ while [ true ] ; do
         fi
 
 done
-
