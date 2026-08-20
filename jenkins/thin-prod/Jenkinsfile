@@ -50,6 +50,7 @@ pipeline {
                         sh 'mvn -s ${MAVEN_SETTINGS} -T 8 -pl opwb-web dependency:copy-dependencies -DskipTests -DoutputDirectory=${WORKSPACE}/opwb-web/target/dependencies'
 
                         echo 'INFO: [3/4] 开始根据差异创建增量包...'
+                        withCredentials([string(credentialsId: 'terminal-api-password', variable: 'API_PASSWORD')]) {
                         sh '''
                             #!/bin/bash
                             set -e
@@ -59,7 +60,7 @@ pipeline {
                             mkdir -p "${BASELINE_PATH}"
 
                             echo "  -> 正在登录服务器获取 Token (IP: 10.189.189.247)..."
-                            JSON_PAYLOAD='{"password": "***REMOVED***", "type": "account"}'
+                            JSON_PAYLOAD="{\"password\": \"${API_PASSWORD}\", \"type\": \"account\"}"
                             LOGIN_RESPONSE=$(curl -s --location --request POST 'http://10.189.189.247:8083/wt/api/terminalAuth/login' \
                                 --header 'Content-Type: application/json' \
                                 --data-raw "${JSON_PAYLOAD}")
@@ -156,6 +157,7 @@ pipeline {
                                 fi
                             done
                         '''
+                        }
                         def buildProps = readProperties file: 'build_vars.properties'
                         env.NO_CHANGES_DETECTED = buildProps.NO_CHANGES_DETECTED
 
