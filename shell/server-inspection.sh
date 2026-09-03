@@ -179,10 +179,9 @@ function get_resource(){
 	# 获得buffer、cache占用内存，当内存不够时会及时回收，所以这两部分可用于可用内存的计算
 	buffer_used=$(free -m | awk 'NR==2' | awk '{print $6}')
 	cache_used=$(free -m | awk 'NR==2' | awk '{print $7}')
+	memery_free=$(free -m | awk 'NR==2' | awk '{print $7}')
 	# 获得被使用内存，所以这部分可用于可用内存的计算，注意计算方法
-	actual_used_all=$[memery_all-(free+buffer_used+cache_used)]
-	# 获得实际占用的内存
-	actual_used_all=`expr $memery_all - $free + $buffer_used + $cache_used `
+	actual_used_all=$((memery_all - memery_free - buffer_used - cache_used))
     memery_percent=$(echo "scale=4;$system_memery_used / $memery_all" | bc)
     memery_percent2=$(echo "scale=4; $actual_used_all / $memery_all" | bc)
     percent_part1=$(echo $memery_percent | cut -c 2-3)
