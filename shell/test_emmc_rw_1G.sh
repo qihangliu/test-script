@@ -1,4 +1,4 @@
- #!/system/bin/sh
+#!/system/bin/sh
 
 # 检查输入参数是否合法，至少需要一个目录参数
 if [ $# -lt 1 ]; then
