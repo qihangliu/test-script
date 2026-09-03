@@ -1,4 +1,3 @@
- script
 #!/bin/bash
 # 该脚本用于监控系统资源使用情况，包括内存、磁盘、写入速度和CPU使用率
 # 监控将持续1小时，每5秒采集一次数据
@@ -18,11 +17,16 @@ while [ $SECONDS -lt $end ]; do
     # 获取根分区磁盘使用率
     DISK=$(df -h | awk '$NF=="/"{printf "%s\t\t", $5}')
 
-    # 获取mmcblk0设备的写入速度，单位转换为MB
-    WRITE=$(grep -w mmcblk0 /proc/diskstats | busybox awk '{sum=$10/2048};END {print sum "MB"}')
+    # 获取写入设备（优先 mmcblk，其次 sda/vda）的写入速度，单位转换为MB
+    DEVICE=$(awk '$3 ~ /^(mmcblk|sd|vd|xvd)/{print $3; exit}' /proc/diskstats)
+    if [ -n "$DEVICE" ]; then
+        WRITE=$(grep -w "$DEVICE" /proc/diskstats | busybox awk '{sum=$10/2048};END {print sum "MB"}')
+    else
+        WRITE="0MB"
+    fi
 
     # 获取CPU使用率，基于/proc/stat中的cpu统计信息计算
-    CPU=$(grep 'cpu ' /proc/stat | busybox awk '{usage=($2+$4)*100/($2+$4+$5)} END {printf "\t\t%.2f%\n", usage }')
+    CPU=$(grep 'cpu ' /proc/stat | busybox awk '{usage=($2+$4)*100/($2+$4+$5)} END {printf "\t\t%.2f%%\n", usage }')
 
     # 输出当前采集的系统资源使用情况
     echo "$MEMORY$DISK$WRITE$CPU"
