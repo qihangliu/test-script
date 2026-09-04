@@ -9,18 +9,18 @@ fi
 # 获取系统启动完成状态属性
 COM=`getprop "sys.boot_completed"`
 echo "rw completed_va 123 :${COM}  ....." > /dev/console
-if [ $COM ='' ]; then
+	if [ "$COM" = '' ]; then
 	COM=0
 fi
 
 echo "rw completed_va:${COM}  ....." > /dev/console
 
 # 等待系统启动完成，直到sys.boot_completed属性值为1
-while [ $COM -ne 1 ]; do
+while [ "$COM" -ne 1 ]; do
 	sleep 1
 	COM=`getprop "sys.boot_completed"`
 	echo "rw completed_va:${COM}  ....." > /dev/console
-	if [ $COM ='' ]; then
+if [ "$COM" = '' ]; then
 		COM=0
 	fi
 done
@@ -183,7 +183,7 @@ while [ true ] ; do
         echo ============== loop: $ix ============== > /dev/console
 
         count=$(cat ${DIR}/count.txt)
-        count=$(($count + 1)); >/dev/console
+        count=$(($count + 1))
         echo $count >/dev/console
         echo -en "$count" >${DIR}/count.txt
 
