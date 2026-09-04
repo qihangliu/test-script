@@ -1,3 +1,4 @@
+#!/bin/bash -e
 #########################################################################
 # Copyright(c) 2020,UNIONMAN TECHNOLOGY CO.,LID
 # All rights reserved
@@ -6,9 +7,8 @@
 # Author : jianfeng.lai
 # History:
 #	Date			Author         	Version		Descripion
-#	2020.03.19		jianfeng.lai	1.0			实现初版功能				
+#	2020.03.19		jianfeng.lai	1.0			实现初版功能
 #########################################################################
-#!/bin/bash -e
 
 version=1.0
 
@@ -19,7 +19,7 @@ tmp_out_file_name=$out_file_name.tmp
  
 function check_input_param()
 {
-    if [[ "a" == "a"$out_file_name || "a" == "a"$file_size || "a" == "a"$size_unit ]]; then
+    if [[ -z "$out_file_name" || -z "$file_size" || -z "$size_unit" ]]; then
         echo "参数错误!"
         echo "输入如下: $0 [out-file-name] [file-szie] [size-unit]"
 		echo "例如: ./fill_data.sh fill_tmp1.bin 1024 M"
@@ -51,7 +51,7 @@ function check_file_size_if_integer()
  
 function check_size_unit()
 {
-    if [[ "K" != $size_unit && "k" != $size_unit && "M" != $size_unit &&  "m" != $size_unit ]]; then
+    if [[ "K" != "$size_unit" && "k" != "$size_unit" && "M" != "$size_unit" && "m" != "$size_unit" ]]; then
         echo "[size-unit] error: 目前只支持 K/M k/m. 表示 xxxKB/xxxMB."
         exit
     fi
@@ -63,9 +63,9 @@ function create_random_file()
     if [[ "K" == $size_unit || "k" == $size_unit  ]]; then
         dd if=/dev/zero of=$tmp_out_file_name bs=1024 count=$file_size
     elif [[ "M" == $size_unit || "m" == $size_unit ]]; then
-        dd if=/dev/zero of=$tmp_out_file_name bs=1048576‬ count=$file_size
+        dd if=/dev/zero of="$tmp_out_file_name" bs=1048576 count=$file_size
     fi
-    mv $tmp_out_file_name $out_file_name
+    mv "$tmp_out_file_name" "$out_file_name"
 }
 
 echo "Tools Version:$version."
