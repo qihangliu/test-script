@@ -147,10 +147,12 @@ function oracle_java () {
 	echo "配置环境变量"
         sudo mv  ~/Downloads/jdk1.8.0_201  /usr/local/jdk
 
-        sudo echo "export JAVA_HOME=/usr/local/jdk" >> /etc/profile
-        sudo echo "export JRE_HOME=\$JAVA_HOME/jre" >> /etc/profile
-        sudo echo "export CLASSPATH=\$JAVA_HOME/lib:\$JRE_HOME/lib" >> /etc/profile
-        sudo echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> /etc/profile
+        sudo tee -a /etc/profile > /dev/null << 'EOF'
+export JAVA_HOME=/usr/local/jdk
+export JRE_HOME=$JAVA_HOME/jre
+export CLASSPATH=$JAVA_HOME/lib:$JRE_HOME/lib
+export PATH=$JAVA_HOME/bin:$PATH
+EOF
 
         echo "测试是否安装成功"
 	java -version
@@ -169,12 +171,9 @@ function oh-my-zsh () {
         # zsh-syntax-highlighting 高亮可用的命令
         # zsh-autosuggestions 输入命令自动补全
         # instll_zsh
-        sudo apt -y  install zsh
-        sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
-        # 由于国内经常无法使用 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-        # 所以，索性将安装脚本下载下来直接使用
+        sudo apt -y install zsh
+        # 安装 oh-my-zsh
         curl -o- https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash
-        # zsh/oh-my-zsh-install.sh
         # choose oh-my-zsh theme
         sed -i "s/^ZSH_THEME=.*/ZSH_THEME=\"ys\"/g" ~/.zshrc
         # install oh-my-zsh plugins
@@ -222,7 +221,7 @@ function firefox () {
         fi
         # 创建deepin桌面图标
         cd /usr/share/applications
-        cat > firefox.deskptop<<-EOF
+        cat > firefox.desktop<<-EOF
         [Desktop Entry]
         Version=last
         Name=Firefox 
@@ -247,7 +246,7 @@ function postman () {
 
         # 创建postman桌面图标
         cd /usr/share/applications
-        cat > postman.deskptop<<-EOF
+        cat > postman.desktop<<-EOF
         [Desktop Entry]
         Type=Application
         Name=Postman
@@ -275,19 +274,19 @@ function postman () {
 # # firefox
 # # postman
 
-if [ $CHOICE = 1 ]; then
+if [ "$CHOICE" = 1 ]; then
         bashrc
-elif [ $CHOICE = 2 ]; then
+elif [ "$CHOICE" = 2 ]; then
         apt_install
-elif [ $CHOICE = 3 ]; then
+elif [ "$CHOICE" = 3 ]; then
         vscode
-elif [ $CHOICE = 4 ]; then
+elif [ "$CHOICE" = 4 ]; then
         oracle_java
-elif [ $CHOICE = 5 ]; then
+elif [ "$CHOICE" = 5 ]; then
         oh-my-zsh
-elif [ $CHOICE = 6 ]; then
+elif [ "$CHOICE" = 6 ]; then
         firefox
-elif [  $Choose = 7 ];then
+elif [ "$CHOICE" = 7 ]; then
         apt_install
         vscode
         oracle_java
