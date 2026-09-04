@@ -59,10 +59,12 @@ function oracle_jdk8 () {
 	echo "configure env variables"
         sudo mv  ~/Downloads/jdk1.8.0_201  /usr/local/jdk
 
-        sudo echo "export JAVA_HOME=/usr/local/jdk" >> /etc/profile
-        sudo echo "export JRE_HOME=\$JAVA_HOME/jre" >> /etc/profile
-        sudo echo "export CLASSPATH=\$JAVA_HOME/lib:\$JRE_HOME/lib" >> /etc/profile
-        sudo echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> /etc/profile
+        sudo tee -a /etc/profile > /dev/null << 'EOF'
+export JAVA_HOME=/usr/local/jdk
+export JRE_HOME=$JAVA_HOME/jre
+export CLASSPATH=$JAVA_HOME/lib:$JRE_HOME/lib
+export PATH=$JAVA_HOME/bin:$PATH
+EOF
 
         echo "test for successful installation"
 	java -version
@@ -82,7 +84,7 @@ function android_sdk () {
 		
         unzip ~/Downloads/platform-tools_r31.0.3-linux.zip
 
-        cp ~/Downloads/platform-android /usr/lib/android-sdk/
+        cp ~/Downloads/platform-tools/adb /usr/lib/android-sdk/
 
         echo "test for successful installation"
         adb --version 
@@ -124,7 +126,7 @@ function oh-my-zsh () {
 function main() {
         apt_install
         get-docker
-        oracle_java
+        oracle_jdk8
         android_sdk
         oh-my-zsh
 
